@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Extension Foundation</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <button id="close-button" type="button" class="close-btn" title="Close">&times;</button>
+
+      <section class="hero">
+        <p class="eyebrow">Phase 6</p>
+        <h1>Extension Foundation</h1>
+        <p class="subtitle">Google auth, Gmail module wiring, privacy notice, and clearer MV3 security UX.</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>YouTube Launcher</h2>
+          <div class="panel-actions">
+            <button id="open-youtube-studio-button" type="button" class="ghost">Open in YouTube Studio</button>
+            <button id="open-last-video-button" type="button" class="secondary">Open Last Video</button>
+          </div>
+        </div>
+
+        <form id="youtube-form" class="stack-form">
+          <label for="youtube-url-input">Paste YouTube URL</label>
+          <input
+            id="youtube-url-input"
+            name="youtubeUrl"
+            type="url"
+            inputmode="url"
+            placeholder="https://www.youtube.com/watch?v=..."
+            autocomplete="off"
+          />
+          <div class="form-row">
+            <select id="quality-select" class="quality-select">
+              <option value="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best">Best quality</option>
+              <option value="bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]">1080p</option>
+              <option value="bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]">720p</option>
+              <option value="bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]">480p</option>
+              <option value="bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]">360p</option>
+            </select>
+            <button id="download-button" type="button" class="secondary">Download</button>
+          </div>
+          <button type="submit" class="open-tab-btn">Open In New Tab</button>
+        </form>
+
+        <div id="download-panel" class="download-panel hidden" aria-live="polite">
+          <div class="download-panel-header">
+            <span id="download-filename" class="download-filename">Downloading…</span>
+            <span id="download-percent" class="download-percent">0%</span>
+          </div>
+          <div class="progress-track">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+          <div class="download-meta">
+            <span id="download-speed"></span>
+            <span id="download-eta"></span>
+          </div>
+          <p id="download-status" class="download-status-msg"></p>
+        </div>
+
+        <div class="compliance-note">
+          <p class="meta-label">Member-only download</p>
+          <p class="helper-text">
+            The <strong>Download</strong> button uses yt-dlp with your Chrome login cookies to download member-only videos.
+            Run <code>native/install.sh &lt;extension-id&gt;</code> once to set up the native helper, then install yt-dlp with <code>brew install yt-dlp</code>.
+          </p>
+          <p class="helper-text">
+            Files save to <strong>~/Downloads</strong> by default.
+          </p>
+        </div>
+
+        <div class="recent-links">
+          <p class="meta-label">Recent links</p>
+          <ul id="recent-links-list" class="recent-links-list">
+            <li class="empty-state">No videos opened yet.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Status</h2>
+          <div class="panel-actions">
+            <button id="open-privacy-notice-button" type="button" class="ghost">Privacy Notice</button>
+            <button id="refresh-button" type="button">Refresh</button>
+          </div>
+        </div>
+
+        <dl class="status-list">
+          <div class="status-row">
+            <dt>Service Worker</dt>
+            <dd id="worker-status">Checking…</dd>
+          </div>
+          <div class="status-row">
+            <dt>Google OAuth Client ID</dt>
+            <dd id="oauth-status">Checking…</dd>
+          </div>
+          <div class="status-row">
+            <dt>Manifest Gmail Scope</dt>
+            <dd id="scope-status">Checking…</dd>
+          </div>
+          <div class="status-row">
+            <dt>Auth Session</dt>
+            <dd id="auth-status">Checking…</dd>
+          </div>
+          <div class="status-row">
+            <dt>Connected Account</dt>
+            <dd id="auth-email">Not connected</dd>
+          </div>
+          <div class="status-row">
+            <dt>Last Auth</dt>
+            <dd id="last-auth">Never</dd>
+          </div>
+          <div class="status-row">
+            <dt>Token Refresh</dt>
+            <dd id="token-status">Checking…</dd>
+          </div>
+          <div class="status-row">
+            <dt>Token Checked</dt>
+            <dd id="token-updated">Never</dd>
+          </div>
+          <div class="status-row">
+            <dt>Popup Opens</dt>
+            <dd id="popup-count">0</dd>
+          </div>
+          <div class="status-row">
+            <dt>Last Opened</dt>
+            <dd id="last-opened">Never</dd>
+          </div>
+          <div class="status-row">
+            <dt>Last Video</dt>
+            <dd id="last-video">Never</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Google Authentication</h2>
+        </div>
+
+        <div class="auth-actions">
+          <button id="connect-button" type="button">Connect Google</button>
+          <button id="reconnect-button" type="button" class="secondary">Reconnect</button>
+          <button id="sign-out-button" type="button" class="ghost">Sign Out</button>
+        </div>
+
+        <div class="auth-meta">
+          <p class="meta-label">Granted scopes</p>
+          <p id="granted-scopes" class="scope-list">Not granted yet</p>
+          <p id="token-status-message" class="helper-copy">Waiting for Google auth state.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Local Storage Demo</h2>
+          <button id="reset-button" type="button" class="secondary">Reset</button>
+        </div>
+
+        <form id="note-form" class="stack-form">
+          <label for="note-input">Saved note</label>
+          <textarea
+            id="note-input"
+            name="note"
+            rows="4"
+            placeholder="Type a note and save it to chrome.storage.local"
+          ></textarea>
+          <button type="submit">Save Note</button>
+        </form>
+
+        <p id="feedback-message" class="feedback" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x '__TRACKED_VAR__/Library/Application Support/YTDownloader/downloader.py')"
+    ]
+  }
+}

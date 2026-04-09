@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Extension Foundation Privacy Notice</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <p class="eyebrow">Privacy Notice</p>
+        <h1>Extension Foundation</h1>
+        <p class="subtitle">How this extension handles Google account data, Gmail access, and saved popup state.</p>
+      </section>
+
+      <section class="card">
+        <h2>What We Store</h2>
+        <ul>
+          <li>Your signed-in email and granted OAuth scopes so the popup can show your current auth state.</li>
+          <li>Recent YouTube links you opened from the popup.</li>
+          <li>The popup open counter and optional local note you save yourself.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>What We Do Not Store</h2>
+        <ul>
+          <li>Raw Google OAuth access tokens are not persisted in <code>chrome.storage.local</code>.</li>
+          <li>Gmail message bodies are not cached by the extension unless you explicitly build your own feature on top of the current API layer.</li>
+          <li>No sync storage, remote analytics, or third-party tracking is included in this scaffold.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Permissions And Why</h2>
+        <ul>
+          <li><code>identity</code> is used for Google sign-in and scope grants through Chrome Identity.</li>
+          <li><code>storage</code> is used for local extension state like auth summaries, recent links, and popup preferences.</li>
+          <li><code>https://gmail.googleapis.com/*</code> is used for Gmail REST API requests you trigger.</li>
+          <li><code>https://accounts.google.com/*</code> is used for Google OAuth and token revoke flows.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Scope Model</h2>
+        <ul>
+          <li><code>gmail.readonly</code> is used for profile, message, and label reads.</li>
+          <li><code>gmail.compose</code> is used only for draft and send flows.</li>
+          <li>The scaffold intentionally avoids broader Gmail scopes such as <code>gmail.modify</code> unless a future feature truly needs them.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>User Control</h2>
+        <ul>
+          <li>You can sign out from the popup to clear cached auth state and revoke the known token.</li>
+          <li>You can clear popup data from the popup reset action.</li>
+          <li>You can remove the extension entirely from <code>chrome://extensions</code> at any time.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
