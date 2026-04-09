@@ -1,6 +1,25 @@
-# Extension Foundation
+# PixelCatch
 
-Phase 6 scaffold for a Manifest V3 browser extension with Google authentication, a Gmail module, YouTube link handling, and stronger UX and privacy controls.
+PixelCatch is a Chrome extension that helps users download YouTube videos in multiple available resolutions through a clean and simple interface.
+
+## Features
+
+- Download YouTube videos directly from the browser
+- Supports multiple available video resolutions
+- Clean and lightweight Chrome extension experience
+- Native messaging integration for local processing
+- Powered by `yt-dlp` for reliable video extraction and downloads
+
+## How It Works
+
+PixelCatch uses a Chrome extension interface together with a native messaging host on your local machine.
+
+Flow:
+
+1. The Chrome extension detects the active YouTube video
+2. The extension sends a request to the native host
+3. The native host runs a Python script
+4. The Python script uses `yt-dlp` to fetch and download the selected video resolution
 
 ## Included
 

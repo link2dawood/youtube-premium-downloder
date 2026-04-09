@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Extension Foundation",
+  "name": "Pixel Catch",
   "version": "0.6.0",
-  "description": "MV3 extension scaffold with Google auth, Gmail APIs, YouTube link handling, and stronger UX and privacy controls.",
+  "description": "Pixel Catch lets you download YouTube videos in multiple available resolutions through a clean and seamless Chrome extension experience.",
   "action": {
-    "default_title": "Extension Foundation"
+    "default_title": "Pixel Catch"
   },
   "options_page": "options/options.html",
   "background": {
