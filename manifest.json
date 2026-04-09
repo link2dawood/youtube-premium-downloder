@@ -12,20 +12,8 @@
     "type": "module"
   },
   "permissions": [
-    "identity",
     "nativeMessaging",
     "storage",
     "windows"
-  ],
-  "host_permissions": [
-    "https://accounts.google.com/*",
-    "https://gmail.googleapis.com/*"
-  ],
-  "oauth2": {
-    "client_id": "865980709872-7as1atkavuo2plo6l8kubqusnm1rc3et.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/gmail.readonly",
-      "https://www.googleapis.com/auth/gmail.compose"
-    ]
-  }
+  ]
 }

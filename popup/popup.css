@@ -294,6 +294,22 @@ h2 {
   color: #b91c1c;
 }
 
+.last-video-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.last-video-label {
+  color: #0f172a;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .compliance-note {
   margin-top: 14px;
   padding: 12px;
