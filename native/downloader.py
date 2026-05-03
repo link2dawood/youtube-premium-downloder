@@ -454,22 +454,30 @@ def run_download(url, download_path, ytdlp, fmt, sort_order, format_key):
     # cookie store but only sends youtube.com cookies in the actual HTTP
     # requests by virtue of standard cookie scoping.
     #
-    # Player clients: "web" carries cookies (for Premium / members-only).
-    # "web_safari" exposes the Premium enhanced-bitrate 1080p stream that the
-    # default web client sometimes hides. "mweb" surfaces additional 4K AV1
-    # variants on some videos. Order matters — yt-dlp tries them in order and
-    # uses the first one that returns the requested format.
+    # Player clients: order matters — yt-dlp merges format lists from all
+    # listed clients, then the -f selector + -S sort pick the winner.
+    #
+    #   "tv"         — YouTube's TV interface. Critically, this client does
+    #                  NOT require a PO (Proof-of-Origin) token, so it
+    #                  exposes the full quality ladder including 4K / 8K.
+    #                  Without `tv`, the `web` client alone caps you at 720p
+    #                  on most videos in 2025+ because YouTube hides higher
+    #                  formats from web clients without a PO token.
+    #   "web"        — carries cookies (for Premium tier streams + members-
+    #                  only content). Not enough on its own for 4K anymore.
+    #   "web_safari" — exposes the Premium enhanced-bitrate 1080p stream.
+    #   "mweb"       — surfaces additional AV1 variants on some videos.
     #
     # --no-playlist guards against the user pasting a /watch?...&list=...
     # URL and accidentally queueing 100 downloads.
     #
-    # -S (sort) is the *real* fix for "I picked 4K but the file looks like
-    # 1080p" — without it yt-dlp's default sort can pick a low-bitrate stream
-    # over a higher-bitrate one at the same resolution.
+    # -S (sort) makes sure the highest-bitrate stream wins among the ones
+    # that match -f — without it yt-dlp can pick a low-bitrate AV1 over a
+    # higher-bitrate VP9 at the same resolution.
     cmd = [
         ytdlp,
         "--cookies-from-browser", "chrome",
-        "--extractor-args", "youtube:player_client=web,web_safari,mweb",
+        "--extractor-args", "youtube:player_client=tv,web,web_safari,mweb",
         "--no-playlist",
         "-f", fmt,
         "-S", sort_order,

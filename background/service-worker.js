@@ -1,56 +1,24 @@
 // Background service worker for PixelCatch.
 //
-// The popup is opened as a free-floating panel window so it can stay visible
-// while the user switches tabs. We guard against double-creation when the
-// toolbar icon is clicked rapidly.
+// Single responsibility: tell Chrome that clicking the toolbar icon opens
+// the side panel (instead of the legacy popup). The side panel itself is
+// declared in manifest.json (`side_panel.default_path`).
+//
+// We deliberately don't open a separate window anymore — the side panel
+// docks to the side of the current Chrome window, persists across tab
+// navigation, and is resizable. That's a much better fit for a downloader
+// the user wants to keep visible while browsing YouTube.
 
-const PANEL_URL = chrome.runtime.getURL("popup/popup.html");
-const PANEL_BOUNDS = { type: "popup", width: 420, height: 700, focused: true };
-
-let panelWindowId = null;
-let openInFlight = null;
-
-async function ensurePanel() {
-  // Coalesce concurrent clicks behind a single in-flight promise so we never
-  // race two windows.create calls while panelWindowId is still null.
-  if (openInFlight) {
-    return openInFlight;
-  }
-
-  openInFlight = (async () => {
-    if (panelWindowId !== null) {
-      try {
-        const win = await chrome.windows.get(panelWindowId);
-        if (win) {
-          await chrome.windows.update(panelWindowId, { focused: true });
-          return panelWindowId;
-        }
-      } catch {
-        // Window was closed externally; fall through and recreate.
-        panelWindowId = null;
-      }
-    }
-
-    const win = await chrome.windows.create({ url: PANEL_URL, ...PANEL_BOUNDS });
-    panelWindowId = win.id;
-    return panelWindowId;
-  })();
-
-  try {
-    return await openInFlight;
-  } finally {
-    openInFlight = null;
-  }
-}
-
-chrome.action.onClicked.addListener(() => {
-  ensurePanel().catch((error) => {
-    console.error("Failed to open PixelCatch panel", error);
-  });
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch((error) => console.error("Failed to set side panel behavior", error));
 });
 
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === panelWindowId) {
-    panelWindowId = null;
-  }
+// Re-apply on startup too, in case onInstalled didn't fire (e.g. a profile
+// migration). setPanelBehavior is idempotent.
+chrome.runtime.onStartup?.addListener?.(() => {
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch(() => { /* ignore — non-fatal */ });
 });

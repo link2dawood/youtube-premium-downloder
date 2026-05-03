@@ -19,6 +19,9 @@
     }
   },
   "options_page": "options/options.html",
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  },
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"
@@ -26,6 +29,6 @@
   "permissions": [
     "nativeMessaging",
     "storage",
-    "windows"
+    "sidePanel"
   ]
 }

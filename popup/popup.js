@@ -618,7 +618,10 @@ function handleYouTubeDownload() {
 
 // --- Event listeners ---
 
-elements.closeButton.addEventListener("click", () => window.close());
+// In the side-panel context the close button is hidden by CSS; the user
+// closes via Chrome's own toolbar toggle. The listener stays harmless here
+// in case an older popup.html (with the button visible) ever loads.
+elements.closeButton?.addEventListener("click", () => window.close());
 
 elements.youtubeForm.addEventListener("submit", (event) => {
   handleYouTubeOpen(event).catch((error) => {

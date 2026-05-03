@@ -13,31 +13,25 @@
 
 body {
   margin: 0;
-  min-width: 360px;
+  /* Side panel can be resized by the user from ~250px upward; let the layout
+     flow at any width and use the full panel. The previous min-width: 360px
+     forced horizontal scrollbars on narrow panels. */
+  min-width: 0;
+  width: 100%;
 }
 
 .popup {
   position: relative;
-  padding: 18px;
+  padding: 16px clamp(12px, 4vw, 22px);
+  max-width: 720px;
+  margin: 0 auto;
 }
 
+/* Side panel users close via Chrome's own toggle in the toolbar; the popup
+   no longer ships its own close button. Hidden via JS attribute removal at
+   init too, but kept hidden in CSS for safety. */
 .close-btn {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 50%;
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 18px;
-  line-height: 1;
-  border: 1px solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
+  display: none;
 }
 
 .close-btn:hover {
@@ -173,10 +167,16 @@ h2 {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.form-row > * {
+  flex: 1 1 140px;   /* dropdown + button each take min 140px, then wrap */
+  min-width: 0;
 }
 
 .quality-select {
-  flex: 1;
+  flex: 1 1 180px;
   padding: 9px 10px;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
@@ -185,6 +185,7 @@ h2 {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  min-width: 0;
 }
 
 .open-tab-btn {
