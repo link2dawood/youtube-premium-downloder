@@ -156,8 +156,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $out = Join-Path $DistDir "PixelCatch-Helper-Setup-$Version.exe"
+
+# Also drop an unversioned copy so the popup's
+# https://github.com/<repo>/releases/latest/download/PixelCatch-Helper-Setup.exe
+# URL hits the right asset on every release without per-version popup updates.
+# Upload both to the GitHub release.
+$latest = Join-Path $DistDir "PixelCatch-Helper-Setup.exe"
+Copy-Item $out $latest -Force
+
 Write-Host ""
-Write-Host "Built: $out" -ForegroundColor Green
+Write-Host "Built:" -ForegroundColor Green
+Write-Host "  $out      (versioned)"
+Write-Host "  $latest  (unversioned — what the popup downloads)"
 Write-Host ""
 Write-Host "To distribute without SmartScreen warnings, code-sign with signtool:"
 Write-Host "  signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a `"$out`""

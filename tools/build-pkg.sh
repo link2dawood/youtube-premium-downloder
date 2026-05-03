@@ -167,8 +167,17 @@ productbuild \
     --package-path "$BUILD_DIR" \
     "$FINAL_PKG"
 
+# Also produce an unversioned alias so the popup's
+# https://github.com/<repo>/releases/latest/download/PixelCatch-Helper.pkg
+# URL hits the right asset on every release without needing per-version popup
+# updates. Both filenames can be uploaded to the same GitHub release.
+LATEST_PKG="$DIST_DIR/PixelCatch-Helper.pkg"
+cp "$FINAL_PKG" "$LATEST_PKG"
+
 echo
-echo "Built: $FINAL_PKG"
+echo "Built:"
+echo "  $FINAL_PKG  (versioned)"
+echo "  $LATEST_PKG  (unversioned — what the popup downloads)"
 echo
 echo "To distribute outside your own Mac, sign and notarize:"
 echo "  productsign --sign 'Developer ID Installer: <Your Name> (TEAMID)' \\"
