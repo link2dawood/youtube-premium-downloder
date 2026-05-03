@@ -78,20 +78,7 @@
           <button type="submit" class="open-tab-btn secondary">Open In New Tab</button>
         </form>
 
-        <div id="download-panel" class="download-panel hidden" aria-live="polite">
-          <div class="download-panel-header">
-            <span id="download-filename" class="download-filename">Downloading…</span>
-            <span id="download-percent" class="download-percent">0%</span>
-          </div>
-          <div class="progress-track">
-            <div id="progress-fill" class="progress-fill"></div>
-          </div>
-          <div class="download-meta">
-            <span id="download-speed"></span>
-            <span id="download-eta"></span>
-          </div>
-          <p id="download-status" class="download-status-msg"></p>
-        </div>
+        <div id="active-downloads" class="active-downloads" aria-live="polite"></div>
 
         <div class="recent-links">
           <p class="meta-label">Recent downloads</p>

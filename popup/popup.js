@@ -51,17 +51,13 @@ const ALLOWED_FORMATS = new Set([
   "audio"
 ]);
 
+const MAX_CONCURRENT_DOWNLOADS = 3;
+
 const elements = {
   closeButton: document.querySelector("#close-button"),
   downloadButton: document.querySelector("#download-button"),
   qualitySelect: document.querySelector("#quality-select"),
-  downloadPanel: document.querySelector("#download-panel"),
-  downloadFilename: document.querySelector("#download-filename"),
-  downloadPercent: document.querySelector("#download-percent"),
-  downloadSpeed: document.querySelector("#download-speed"),
-  downloadEta: document.querySelector("#download-eta"),
-  downloadStatus: document.querySelector("#download-status"),
-  progressFill: document.querySelector("#progress-fill"),
+  activeDownloads: document.querySelector("#active-downloads"),
   openLastVideoButton: document.querySelector("#open-last-video-button"),
   openYouTubeStudioButton: document.querySelector("#open-youtube-studio-button"),
   recentLinksList: document.querySelector("#recent-links-list"),
@@ -242,16 +238,98 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
-function updateProgress({ percent = 0, speed = "", eta = "", label = "Downloading…", statusMsg = "", isError = false, isDone = false } = {}) {
-  elements.downloadPanel.classList.remove("hidden");
-  elements.downloadFilename.textContent = label;
-  elements.downloadPercent.textContent = `${Math.round(percent)}%`;
-  elements.progressFill.style.width = `${percent}%`;
-  elements.progressFill.classList.toggle("complete", isDone);
-  elements.downloadSpeed.textContent = speed;
-  elements.downloadEta.textContent = eta ? `ETA ${eta}` : "";
-  elements.downloadStatus.textContent = statusMsg;
-  elements.downloadStatus.className = `download-status-msg${isError ? " error" : ""}`;
+// --- Multi-download state ---
+//
+// Each in-flight download is a card in #active-downloads. We track them in a
+// Map keyed by an internal job id so we can update / cancel individual jobs.
+// Closing the popup window destroys all `port` references, which disconnects
+// the native messaging ports and terminates the corresponding yt-dlp procs —
+// document this clearly in the README so users know to keep the popup open.
+
+let nextJobId = 1;
+const activeJobs = new Map();   // id -> { port, card, els, finished, url }
+
+function activeDownloadCount() {
+  let n = 0;
+  for (const job of activeJobs.values()) {
+    if (!job.finished) n++;
+  }
+  return n;
+}
+
+function createDownloadCard(initialLabel) {
+  const card = document.createElement("div");
+  card.className = "download-card";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "download-card-cancel";
+  cancelBtn.title = "Cancel";
+  cancelBtn.textContent = "×";
+
+  const header = document.createElement("div");
+  header.className = "download-panel-header";
+  const filename = document.createElement("span");
+  filename.className = "download-filename";
+  filename.textContent = initialLabel || "Connecting…";
+  const percent = document.createElement("span");
+  percent.className = "download-percent";
+  percent.textContent = "0%";
+  header.append(filename, percent);
+
+  const track = document.createElement("div");
+  track.className = "progress-track";
+  const fill = document.createElement("div");
+  fill.className = "progress-fill";
+  track.append(fill);
+
+  const meta = document.createElement("div");
+  meta.className = "download-meta";
+  const speed = document.createElement("span");
+  const eta = document.createElement("span");
+  meta.append(speed, eta);
+
+  const status = document.createElement("p");
+  status.className = "download-status-msg";
+
+  card.append(cancelBtn, header, track, meta, status);
+  elements.activeDownloads.prepend(card);
+
+  return {
+    card,
+    els: { cancelBtn, filename, percent, fill, speed, eta, status },
+  };
+}
+
+function applyProgress(els, { percent = 0, speed = "", eta = "", label, statusMsg = "", isError = false, isDone = false } = {}) {
+  if (label !== undefined) els.filename.textContent = label;
+  els.percent.textContent = `${Math.round(percent)}%`;
+  els.fill.style.width = `${percent}%`;
+  els.fill.classList.toggle("complete", isDone);
+  els.speed.textContent = speed;
+  els.eta.textContent = eta ? `ETA ${eta}` : "";
+  els.status.textContent = statusMsg;
+  els.status.className = `download-status-msg${isError ? " error" : ""}`;
+}
+
+function finalizeJob(jobId, kind /* "done" | "error" | "canceled" */) {
+  const job = activeJobs.get(jobId);
+  if (!job) return;
+  job.finished = true;
+  if (job.card) {
+    job.card.classList.toggle("done", kind === "done");
+    job.card.classList.toggle("error", kind === "error" || kind === "canceled");
+  }
+  // Remove the cancel button — the job is no longer cancelable.
+  job.els?.cancelBtn?.remove();
+  // Auto-dismiss completed cards after a moment so the list doesn't grow
+  // forever, but keep error / canceled cards around so the user can read why.
+  if (kind === "done") {
+    setTimeout(() => {
+      job.card?.remove();
+      activeJobs.delete(jobId);
+    }, 4000);
+  }
 }
 
 function formatRecentLinkLabel(entry) {
@@ -436,74 +514,106 @@ function handleYouTubeDownload() {
     normalizedEntry = validateAndNormalizeYouTubeUrl(elements.youtubeUrlInput.value);
     format = validateFormat(elements.qualitySelect.value);
   } catch (error) {
-    updateProgress({ label: "Invalid input", statusMsg: error.message, isError: true });
+    // Surface validation failures as a one-shot error card.
+    const { card, els } = createDownloadCard("Invalid input");
+    applyProgress(els, { label: "Invalid input", statusMsg: error.message, isError: true });
+    card.classList.add("error");
+    els.cancelBtn.remove();
     return;
   }
 
-  elements.downloadButton.disabled = true;
-  updateProgress({ label: "Connecting…", statusMsg: "Starting download…" });
+  if (activeDownloadCount() >= MAX_CONCURRENT_DOWNLOADS) {
+    const { card, els } = createDownloadCard("Queue full");
+    applyProgress(els, {
+      label: "Queue full",
+      statusMsg: `Already downloading ${MAX_CONCURRENT_DOWNLOADS} videos. Wait for one to finish, then try again.`,
+      isError: true,
+    });
+    card.classList.add("error");
+    els.cancelBtn.remove();
+    setTimeout(() => card.remove(), 4000);
+    return;
+  }
+
+  const jobId = nextJobId++;
+  const { card, els } = createDownloadCard("Connecting…");
+  applyProgress(els, { label: "Connecting…", statusMsg: "Starting download…" });
 
   let port;
-  let finished = false;
-
   try {
     port = chrome.runtime.connectNative(NATIVE_HOST);
   } catch (error) {
-    updateProgress({
+    applyProgress(els, {
       label: "Error",
       statusMsg: friendlyNativeError(error.message),
       isError: true,
     });
-    elements.downloadButton.disabled = false;
+    finalizeJob(jobId, "error");
+    activeJobs.set(jobId, { port: null, card, els, finished: true, url: normalizedEntry.url });
     return;
   }
 
+  const job = { port, card, els, finished: false, url: normalizedEntry.url };
+  activeJobs.set(jobId, job);
+
+  els.cancelBtn.addEventListener("click", () => {
+    if (job.finished) return;
+    try { port.disconnect(); } catch { /* already disconnected */ }
+    applyProgress(els, { label: "Canceled", statusMsg: "You canceled this download.", isError: true });
+    finalizeJob(jobId, "canceled");
+  });
+
   port.onMessage.addListener((msg) => {
     if (msg.type === "progress") {
-      updateProgress({
+      applyProgress(els, {
         percent: msg.percent ?? 0,
         speed: msg.speed ?? "",
         eta: msg.eta ?? "",
         label: msg.filename ?? "Downloading…",
-        statusMsg: msg.status ?? ""
+        statusMsg: msg.status ?? "",
       });
     } else if (msg.type === "done") {
-      finished = true;
-      updateProgress({
+      applyProgress(els, {
         percent: 100,
         label: msg.filename ?? "Complete",
-        statusMsg: msg.message ?? "Download complete. Check ~/Downloads.",
-        isDone: true
+        statusMsg: msg.message ?? "Download complete.",
+        isDone: true,
       });
       saveRecentYouTubeLink({ url: normalizedEntry.url, openedAt: new Date().toISOString() })
         .then(refreshRecentLinks)
         .catch((err) => console.error("Failed to save recent link", err));
-      elements.downloadButton.disabled = false;
+      finalizeJob(jobId, "done");
     } else if (msg.type === "error") {
-      finished = true;
-      updateProgress({ label: "Failed", statusMsg: msg.error ?? "Download failed.", isError: true });
-      elements.downloadButton.disabled = false;
+      applyProgress(els, { label: "Failed", statusMsg: msg.error ?? "Download failed.", isError: true });
+      finalizeJob(jobId, "error");
     }
   });
 
   port.onDisconnect.addListener(() => {
-    // Chrome always fires onDisconnect with lastError="Native host has exited"
-    // even on a clean successful exit — only show it if we never got a done/error message.
-    if (!finished && chrome.runtime.lastError) {
-      updateProgress({
+    if (job.finished) return;
+    // Native host went away before sending done/error — surface the underlying
+    // chrome.runtime.lastError if we have one, otherwise leave the card in
+    // its last-known state.
+    const lastError = chrome.runtime.lastError?.message;
+    if (lastError) {
+      applyProgress(els, {
         label: "Error",
-        statusMsg: friendlyNativeError(chrome.runtime.lastError.message),
+        statusMsg: friendlyNativeError(lastError),
         isError: true,
       });
     }
-    elements.downloadButton.disabled = false;
+    finalizeJob(jobId, "error");
   });
 
   port.postMessage({
     action: "download",
     url: normalizedEntry.url,
-    format
+    format,
   });
+
+  // Clear the URL field so the user can immediately queue another download.
+  elements.youtubeUrlInput.value = "";
+  elements.youtubeUrlInput.focus();
 }
 
 // --- Event listeners ---

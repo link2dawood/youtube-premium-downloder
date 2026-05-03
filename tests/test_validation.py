@@ -35,7 +35,7 @@ class TestUrlValidation:
         "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
     ])
     def test_allowed_youtube_hosts(self, url):
-        out_url, _, _, _ = validate_and_normalize_message({
+        out_url, _, _, _, _ = validate_and_normalize_message({
             "action": "download",
             "url": url,
             "format": "best",
@@ -98,27 +98,37 @@ class TestActionValidation:
 class TestFormatValidation:
     @pytest.mark.parametrize("key", list(FORMAT_PRESETS))
     def test_every_preset_resolves(self, key):
-        _, fmt, _, returned_key = validate_and_normalize_message({
+        _, fmt, sort, _, returned_key = validate_and_normalize_message({
             "action": "download",
             "url": "https://youtube.com/watch?v=x",
             "format": key,
         })
-        assert fmt == FORMAT_PRESETS[key]
+        expected_fmt, expected_sort = FORMAT_PRESETS[key]
+        assert fmt == expected_fmt
+        assert sort == expected_sort
         assert returned_key == key
 
     def test_2k_and_4k_present(self):
         # Anti-regression: the explicit reason this PR exists.
         assert "2k" in FORMAT_PRESETS
         assert "4k" in FORMAT_PRESETS
-        assert "1440" in FORMAT_PRESETS["2k"]
-        assert "2160" in FORMAT_PRESETS["4k"]
+        # FORMAT_PRESETS values are (selector, sort) tuples now; check both.
+        sel_2k, sort_2k = FORMAT_PRESETS["2k"]
+        sel_4k, sort_4k = FORMAT_PRESETS["4k"]
+        assert "1440" in sel_2k
+        assert "2160" in sel_4k
+        # The sort criteria *must* include resolution and bitrate to fix the
+        # "4K but looks like 1080p" complaint — without explicit sorting yt-dlp
+        # may pick a low-bitrate stream over a higher-bitrate one.
+        assert "res:" in sort_4k and "tbr" in sort_4k
 
     def test_video_presets_dont_lock_container(self):
         # 4K on YouTube is VP9/AV1 in webm — locking [ext=mp4] would silently
         # downgrade to 1080p. Make sure no video preset re-introduces that
         # constraint.
         for key in ("4k", "2k", "1080p", "720p", "480p", "best"):
-            assert "[ext=mp4]" not in FORMAT_PRESETS[key], (
+            sel, _ = FORMAT_PRESETS[key]
+            assert "[ext=mp4]" not in sel, (
                 f"{key} preset must not lock the container to mp4"
             )
 
@@ -127,12 +137,12 @@ class TestFormatValidation:
         assert "audio" in AUDIO_ONLY_FORMATS
 
     def test_format_is_case_insensitive(self):
-        _, fmt, _, _ = validate_and_normalize_message({
+        _, fmt, _, _, _ = validate_and_normalize_message({
             "action": "download",
             "url": "https://youtube.com/watch?v=x",
             "format": "  4K  ",
         })
-        assert fmt == FORMAT_PRESETS["4k"]
+        assert fmt == FORMAT_PRESETS["4k"][0]
 
     @pytest.mark.parametrize("bad_format", [
         "",
@@ -156,7 +166,7 @@ class TestFormatValidation:
 
 class TestDownloadPath:
     def test_default_path_when_omitted(self):
-        _, _, path, _ = validate_and_normalize_message({
+        _, _, _, path, _ = validate_and_normalize_message({
             "action": "download",
             "url": "https://youtube.com/watch?v=x",
             "format": "best",
@@ -187,7 +197,7 @@ class TestDownloadPath:
             "downloader.ALLOWED_DOWNLOAD_DIRS",
             (os.path.realpath(fake_root),),
         )
-        _, _, path, _ = validate_and_normalize_message({
+        _, _, _, path, _ = validate_and_normalize_message({
             "action": "download",
             "url": "https://youtube.com/watch?v=x",
             "format": "best",

@@ -139,7 +139,7 @@ YOUTUBE_HOSTS = {
     "www.youtube-nocookie.com",
 }
 
-# Map UI symbol -> vetted yt-dlp -f selector.
+# Map UI symbol -> (yt-dlp -f selector, yt-dlp -S sort criteria).
 #
 # Notes for Premium / members-only content:
 #   - YouTube serves 1440p/2160p as separate video+audio (VP9/AV1 + Opus/AAC),
@@ -149,19 +149,23 @@ YOUTUBE_HOSTS = {
 #     mp4 when possible and mkv when the codecs require it.
 #   - "bv*" / "ba" allow yt-dlp to also pick a single combined stream when
 #     that's actually the best option (some 360p/480p paths).
+#   - The -S (sort) criteria force the *highest-bitrate* stream that fits the
+#     resolution cap. Without explicit sorting, yt-dlp's default order can
+#     pick a low-bitrate AV1 over a much-higher-bitrate VP9 at the same
+#     resolution — which is what users describe as "4K but looks like 1080p."
+#   - "tbr" (total bitrate) is the strongest "actual quality" proxy. We weight
+#     resolution > bitrate > fps > codec preference.
 #   - Authentication for Premium / members-only happens via cookies; the format
 #     string itself doesn't change — yt-dlp will simply have access to higher
 #     bitrate streams when the cookies grant membership.
 FORMAT_PRESETS = {
-    "best":  "bv*+ba/best",
-    "4k":    "bv*[height<=2160]+ba/best[height<=2160]",
-    "2k":    "bv*[height<=1440]+ba/best[height<=1440]",
-    "1080p": "bv*[height<=1080]+ba/best[height<=1080]",
-    "720p":  "bv*[height<=720]+ba/best[height<=720]",
-    "480p":  "bv*[height<=480]+ba/best[height<=480]",
-    # Audio-only: prefer m4a so it plays everywhere; fall back to whatever
-    # bestaudio resolves to (usually opus in webm).
-    "audio": "ba[ext=m4a]/ba/best",
+    "best":  ("bv*+ba/best",                                "res,tbr,fps,vcodec:av01,acodec:opus,channels"),
+    "4k":    ("bv*[height<=2160]+ba/best[height<=2160]",    "res:2160,tbr,fps,vcodec:av01,acodec:opus"),
+    "2k":    ("bv*[height<=1440]+ba/best[height<=1440]",    "res:1440,tbr,fps,vcodec:av01,acodec:opus"),
+    "1080p": ("bv*[height<=1080]+ba/best[height<=1080]",    "res:1080,tbr,fps,vcodec:vp09,acodec:opus"),
+    "720p":  ("bv*[height<=720]+ba/best[height<=720]",      "res:720,tbr,fps"),
+    "480p":  ("bv*[height<=480]+ba/best[height<=480]",      "res:480,tbr,fps"),
+    "audio": ("ba[ext=m4a]/ba/best",                        "abr,acodec:opus"),
 }
 
 # Quality keys that download audio-only. The runner skips video merge args
@@ -217,9 +221,11 @@ def validate_and_normalize_message(msg):
     """
     Validates a native-messaging payload from the extension popup.
 
-    Returns (url, format_string, download_path, format_key).
-    `format_key` is the symbolic name (e.g. "4k", "audio") and lets the
-    runner choose audio-only vs video+audio behavior.
+    Returns (url, format_string, sort_string, download_path, format_key).
+    `format_string` is the yt-dlp -f selector; `sort_string` is the matching
+    -S sort order (which determines which stream wins among ones that match
+    the selector). `format_key` is the symbolic name (e.g. "4k", "audio") and
+    lets the runner choose audio-only vs video+audio behavior.
 
     Raises ValidationError on bad input.
     """
@@ -260,7 +266,7 @@ def validate_and_normalize_message(msg):
     if format_key not in FORMAT_PRESETS:
         allowed = ", ".join(sorted(FORMAT_PRESETS))
         raise ValidationError(f"Unknown format {format_key!r}. Allowed: {allowed}.")
-    format_string = FORMAT_PRESETS[format_key]
+    format_string, sort_string = FORMAT_PRESETS[format_key]
 
     # Download path
     raw_path = msg.get("downloadPath", "")
@@ -281,7 +287,7 @@ def validate_and_normalize_message(msg):
             raise ValidationError(f"downloadPath does not exist: {raw_path!r}")
         download_path = os.path.realpath(expanded)
 
-    return url, format_string, download_path, format_key
+    return url, format_string, sort_string, download_path, format_key
 
 
 # ---------- yt-dlp discovery ----------
@@ -435,7 +441,7 @@ def _terminate_active(_sig=None, _frame=None):
     sys.exit(0)
 
 
-def run_download(url, download_path, ytdlp, fmt, format_key):
+def run_download(url, download_path, ytdlp, fmt, sort_order, format_key):
     global _active_proc
     filename = ""
     audio_only = format_key in AUDIO_ONLY_FORMATS
@@ -448,20 +454,32 @@ def run_download(url, download_path, ytdlp, fmt, format_key):
     # cookie store but only sends youtube.com cookies in the actual HTTP
     # requests by virtue of standard cookie scoping.
     #
-    # Player client: "web" is the only client that consistently respects the
-    # auth cookies, which is what unlocks membership-gated content and the
-    # Premium-tier 1080p enhanced bitrate. Earlier configurations included
-    # "ios" — that client ignores cookies and silently falls back to a
-    # non-member view, defeating the whole point of this extension.
+    # Player clients: "web" carries cookies (for Premium / members-only).
+    # "web_safari" exposes the Premium enhanced-bitrate 1080p stream that the
+    # default web client sometimes hides. "mweb" surfaces additional 4K AV1
+    # variants on some videos. Order matters — yt-dlp tries them in order and
+    # uses the first one that returns the requested format.
+    #
+    # --no-playlist guards against the user pasting a /watch?...&list=...
+    # URL and accidentally queueing 100 downloads.
+    #
+    # -S (sort) is the *real* fix for "I picked 4K but the file looks like
+    # 1080p" — without it yt-dlp's default sort can pick a low-bitrate stream
+    # over a higher-bitrate one at the same resolution.
     cmd = [
         ytdlp,
         "--cookies-from-browser", "chrome",
-        "--extractor-args", "youtube:player_client=web",
+        "--extractor-args", "youtube:player_client=web,web_safari,mweb",
+        "--no-playlist",
         "-f", fmt,
+        "-S", sort_order,
         "--newline",
         "--progress",
         "--progress-template",
         f"{PROGRESS_PREFIX}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s",
+        # Echo the actual format that won so a future "low quality" complaint
+        # is debuggable from the log without re-running.
+        "--print", "before_dl:[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s",
         "-o", os.path.join(download_path, "%(title)s.%(ext)s"),
     ]
 
@@ -598,7 +616,7 @@ def main():
         return
 
     try:
-        url, fmt, download_path, format_key = validate_and_normalize_message(message)
+        url, fmt, sort_order, download_path, format_key = validate_and_normalize_message(message)
     except ValidationError as exc:
         send_message({"type": "error", "error": str(exc)})
         return
@@ -618,7 +636,7 @@ def main():
         })
         return
 
-    run_download(url, download_path, ytdlp, fmt, format_key)
+    run_download(url, download_path, ytdlp, fmt, sort_order, format_key)
 
 
 if __name__ == "__main__":
