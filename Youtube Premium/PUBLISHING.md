@@ -105,31 +105,51 @@ If you don't have a Windows machine, **use the GitHub Actions workflow above** �
 
 ---
 
-## Release notes template
+## What end users will see when they download
 
-Paste this into the GitHub release description and edit:
+Until you sign + notarize, every download triggers the OS's "this is unsigned" warning. Bake the bypass instructions into the release notes (the GitHub Actions workflow already does this) so users have a clear answer in front of them.
 
-```markdown
-## PixelCatch 1.0.0 — first release
+### macOS — "PixelCatch-Helper.pkg" Not Opened
 
-Download YouTube Premium and members-only videos at any resolution up to 4K (2160p), or audio-only.
+Apple's Gatekeeper blocks unsigned .pkg files downloaded from the internet. The fix is per-user, takes 5 seconds:
 
-### Install
+1. **Right-click** the .pkg in Finder (don't double-click).
+2. Choose **Open** from the menu.
+3. Click **Open** in the dialog.
+4. Enter admin password.
 
-- **macOS:** download `PixelCatch-Helper.pkg`, double-click, enter your admin password.
-- **Windows:** download `PixelCatch-Helper-Setup.exe`, double-click, click through the wizard.
-- **Linux:** download `install-linux.sh`, then run it from a terminal:
-  ```bash
-  bash install-linux.sh --extension-id <your-extension-id>
-  ```
+On macOS 13+ (Ventura/Sonoma/Sequoia) the right-click menu often doesn't show **Open** for unsigned installers. Workaround:
 
-After installing the helper, install the Chrome extension and click its icon. The popup will detect the helper automatically.
+1. Double-click the .pkg → get blocked.
+2. **System Settings → Privacy & Security** → scroll to bottom → **Open Anyway**.
+3. Enter admin password.
 
-### Requirements
+### Windows — "Windows protected your PC"
 
-- A signed-in YouTube account in Chrome.
-- Channel membership for members-only videos; YouTube Premium for the enhanced 1080p stream.
-```
+SmartScreen blocks unsigned .exe files. The bypass:
+
+1. Double-click the .exe → SmartScreen blocks it.
+2. Click **More info** in the dialog.
+3. Click **Run anyway**.
+4. Click through the wizard.
+
+### Linux
+
+No equivalent friction. The installer is a shell script — there's nothing to "trust."
+
+---
+
+## Killing the warnings permanently (sign + notarize)
+
+When you're ready to ship to non-technical users at scale, sign the installers so the warnings vanish:
+
+| | macOS | Windows |
+|---|---|---|
+| Cost | $99/year (Apple Developer Program) | $200–$700/year (code-signing CA) |
+| Tools | `productsign`, `xcrun notarytool`, `xcrun stapler` (already in `tools/README.md`) | `signtool` (in Windows SDK) |
+| Effect | .pkg opens with no warning | EV cert: instant trust. OV cert: builds reputation after ~few hundred installs. |
+
+Both can be wired into the GitHub Actions workflow as additional steps that run after the build but before the release. You'd add the cert as an Actions secret. Open a follow-up if you want me to add the signing steps once you have the certs in hand.
 
 ---
 

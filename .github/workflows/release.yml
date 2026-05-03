@@ -148,10 +148,27 @@ jobs:
 
             ## Install
 
-            - **macOS**: download `PixelCatch-Helper.pkg`, double-click, enter your admin password.
-            - **Windows**: download `PixelCatch-Helper-Setup.exe`, double-click, click through the wizard.
-            - **Linux**: download `install-linux.sh`, then run:
-              `bash install-linux.sh --extension-id <your-extension-id>`
+            ### macOS
+
+            1. Download `PixelCatch-Helper.pkg`.
+            2. **Right-click** the .pkg in Finder → **Open** → click **Open** in the dialog.
+               (Don't double-click — macOS Gatekeeper will block it because the .pkg isn't signed by Apple yet. Right-clicking → Open lets you bypass that for one file.)
+            3. Enter your admin password to complete the install.
+
+            On macOS 13+ (Ventura / Sonoma / Sequoia) the right-click menu may not show an Open option. In that case: double-click and let it get blocked, then open **System Settings → Privacy & Security**, scroll to the bottom, and click **Open Anyway** next to the PixelCatch-Helper.pkg notice.
+
+            ### Windows
+
+            1. Download `PixelCatch-Helper-Setup.exe`.
+            2. Double-click it. **Windows SmartScreen** may say *"Windows protected your PC — Don't run."* Click **More info → Run anyway**.
+               (Same reason as macOS Gatekeeper — the .exe isn't code-signed yet. SmartScreen learns to trust the publisher after a few hundred installs, or vanishes immediately if you sign with an EV certificate.)
+            3. Click through the installer wizard.
+
+            ### Linux
+
+            1. Download `install-linux.sh`.
+            2. Run it from a terminal:
+               `bash install-linux.sh --extension-id <your-extension-id>`
 
             After the helper is installed, install the PixelCatch Chrome extension and click its icon — it auto-detects the helper.
 
@@ -159,6 +176,12 @@ jobs:
 
             - A signed-in YouTube account in Chrome.
             - Channel membership for members-only videos; YouTube Premium for the enhanced 1080p stream.
+
+            ## Why the security warnings?
+
+            The .pkg and .exe in this release are not code-signed. Signing requires an Apple Developer Program membership ($99/yr) for the .pkg and a Windows code-signing certificate ($200–$700/yr) for the .exe. Until those are added, every download triggers your OS's built-in malware-warning UI — that's normal and expected for unsigned installers, not a sign that anything is wrong.
+
+            The source code that builds these installers is the contents of this repository at the tag attached to this release. You're welcome to verify the build by re-running `tools/build-pkg.sh` / `tools/build-win.ps1` against this commit yourself.
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
           fail_on_unmatched_files: true
           files: |
