@@ -111,6 +111,51 @@ else
     chmod 755 "$YTDLP_BIN"
 fi
 
+# ---------- ffmpeg + ffprobe ----------
+#
+# Required for any 1080p/1440p/4K download (YouTube serves those as separate
+# streams that yt-dlp must mux). If the system already has ffmpeg, prefer
+# that — it's almost certainly more current than what we'd bundle. Otherwise
+# pull a static build from johnvansickle.com (popular, signed, maintained).
+
+if command -v ffmpeg >/dev/null 2>&1 && [ -z "${BUNDLE_FFMPEG:-}" ] && [ "$SKIP_DOWNLOAD" -eq 0 ]; then
+    echo "ffmpeg already on PATH at $(command -v ffmpeg) — skipping bundle"
+elif [ -f "$INSTALL_DIR/ffmpeg" ]; then
+    echo "ffmpeg already bundled at $INSTALL_DIR/ffmpeg — leaving it alone"
+elif [ "$SKIP_DOWNLOAD" -eq 1 ]; then
+    echo "Skipping ffmpeg download (--skip-ytdlp-download). Provide ffmpeg + ffprobe in $INSTALL_DIR yourself, or have them on PATH."
+else
+    case "$ARCH" in
+        x86_64|amd64) FFMPEG_TARBALL="ffmpeg-release-amd64-static.tar.xz" ;;
+        aarch64|arm64) FFMPEG_TARBALL="ffmpeg-release-arm64-static.tar.xz" ;;
+        armv7l|armhf) FFMPEG_TARBALL="ffmpeg-release-armhf-static.tar.xz" ;;
+        *) FFMPEG_TARBALL="" ;;
+    esac
+
+    if [ -z "$FFMPEG_TARBALL" ]; then
+        echo "Warning: no static ffmpeg build for arch '$ARCH'." >&2
+        echo "Install ffmpeg via your package manager: sudo apt install ffmpeg / sudo dnf install ffmpeg / sudo pacman -S ffmpeg" >&2
+    else
+        URL="https://johnvansickle.com/ffmpeg/releases/$FFMPEG_TARBALL"
+        TMP_TAR="$INSTALL_DIR/.ffmpeg.tar.xz"
+        echo "Downloading ffmpeg ($FFMPEG_TARBALL)..."
+        if command -v curl >/dev/null 2>&1; then
+            curl -fL --retry 3 -o "$TMP_TAR" "$URL"
+        else
+            wget -q -O "$TMP_TAR" "$URL"
+        fi
+        # Tarball is a single top-level dir like ffmpeg-7.1.1-amd64-static/.
+        # Extract just the ffmpeg + ffprobe binaries from it.
+        tar -xJf "$TMP_TAR" -C "$INSTALL_DIR" --strip-components=1 \
+            --wildcards '*/ffmpeg' '*/ffprobe' || {
+                echo "Warning: ffmpeg extraction failed; downloads above 720p may not work." >&2
+            }
+        rm -f "$TMP_TAR"
+        [ -f "$INSTALL_DIR/ffmpeg"  ] && chmod 755 "$INSTALL_DIR/ffmpeg"
+        [ -f "$INSTALL_DIR/ffprobe" ] && chmod 755 "$INSTALL_DIR/ffprobe"
+    fi
+fi
+
 # ---------- Generate runner.sh ----------
 
 RUNNER="$INSTALL_DIR/runner.sh"

@@ -110,6 +110,27 @@ if (-not (Test-Path $YtDlpCache)) {
 }
 Copy-Item $YtDlpCache (Join-Path $PayloadDir "yt-dlp.exe")
 
+# ---------- ffmpeg + ffprobe (Windows static builds from BtbN) ----------
+# Required for any 1080p / 1440p / 4K download because YouTube splits those
+# into separate video + audio streams that yt-dlp has to mux.
+$FfmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip"
+$FfmpegCache = Join-Path $CacheDir "ffmpeg-win64.zip"
+if (-not (Test-Path $FfmpegCache)) {
+    Write-Host "Downloading ffmpeg (Windows x64 static)..."
+    Invoke-WebRequest -Uri $FfmpegUrl -OutFile $FfmpegCache -UseBasicParsing
+}
+$FfmpegExtract = Join-Path $env:TEMP "pixelcatch-ffmpeg-extract"
+if (Test-Path $FfmpegExtract) { Remove-Item $FfmpegExtract -Recurse -Force }
+Expand-Archive -Path $FfmpegCache -DestinationPath $FfmpegExtract -Force
+$ffmpegBin  = Get-ChildItem -Path $FfmpegExtract -Recurse -Filter "ffmpeg.exe"  | Select-Object -First 1
+$ffprobeBin = Get-ChildItem -Path $FfmpegExtract -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+if (-not $ffmpegBin -or -not $ffprobeBin) {
+    Write-Error "ffmpeg.exe / ffprobe.exe not found in the BtbN zip — layout may have changed."
+}
+Copy-Item $ffmpegBin.FullName  (Join-Path $PayloadDir "ffmpeg.exe")
+Copy-Item $ffprobeBin.FullName (Join-Path $PayloadDir "ffprobe.exe")
+Remove-Item $FfmpegExtract -Recurse -Force
+
 # ---------- Embeddable Python ----------
 $PythonCache = Join-Path $CacheDir $PythonZip
 if (-not (Test-Path $PythonCache)) {

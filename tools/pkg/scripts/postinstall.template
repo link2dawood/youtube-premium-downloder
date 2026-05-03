@@ -65,6 +65,10 @@ chmod 755 "$RUNNER"
 
 chmod 755 "$INSTALL_DIR/downloader.py"
 chmod 755 "$INSTALL_DIR/yt-dlp"
+# ffmpeg + ffprobe are bundled when present; chmod conditionally so the
+# postinstall keeps working if a future build skips them.
+[ -f "$INSTALL_DIR/ffmpeg"  ] && chmod 755 "$INSTALL_DIR/ffmpeg"  || true
+[ -f "$INSTALL_DIR/ffprobe" ] && chmod 755 "$INSTALL_DIR/ffprobe" || true
 
 # --- 2a. Strip the macOS quarantine attribute from the installed files. ---
 #

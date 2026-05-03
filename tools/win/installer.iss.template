@@ -52,6 +52,8 @@ SetupLogging=yes
 [Files]
 Source: "payload\downloader.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "payload\yt-dlp.exe";    DestDir: "{app}"; Flags: ignoreversion
+Source: "payload\ffmpeg.exe";    DestDir: "{app}"; Flags: ignoreversion
+Source: "payload\ffprobe.exe";   DestDir: "{app}"; Flags: ignoreversion
 Source: "payload\python-embed\*"; DestDir: "{app}\python-embed"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "payload\manifest.json"; DestDir: "{app}"; DestName: "{#HostName}.json"; Flags: ignoreversion
 Source: "payload\runner.bat";    DestDir: "{app}"; Flags: ignoreversion

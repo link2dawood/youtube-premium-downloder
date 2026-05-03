@@ -111,6 +111,30 @@ fi
 cp "$YTDLP_CACHE" "$ROOT_DIR/yt-dlp"
 chmod 755 "$ROOT_DIR/yt-dlp"
 
+# ---------- ffmpeg + ffprobe (macOS universal, signed) ----------
+#
+# yt-dlp needs ffmpeg to merge separate video+audio streams, which is
+# every 1080p / 1440p / 4K download on YouTube. evermeet.cx publishes
+# signed universal macOS builds — much easier than rolling our own.
+
+FFMPEG_URL="https://evermeet.cx/ffmpeg/getrelease/zip"
+FFPROBE_URL="https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip"
+FFMPEG_ZIP="$CACHE_DIR/ffmpeg-macos.zip"
+FFPROBE_ZIP="$CACHE_DIR/ffprobe-macos.zip"
+
+if [ ! -f "$FFMPEG_ZIP" ]; then
+    echo "Downloading ffmpeg (macOS universal)..."
+    curl -fL --retry 3 -o "$FFMPEG_ZIP" "$FFMPEG_URL"
+fi
+if [ ! -f "$FFPROBE_ZIP" ]; then
+    echo "Downloading ffprobe (macOS universal)..."
+    curl -fL --retry 3 -o "$FFPROBE_ZIP" "$FFPROBE_URL"
+fi
+
+unzip -p "$FFMPEG_ZIP"  ffmpeg  > "$ROOT_DIR/ffmpeg"
+unzip -p "$FFPROBE_ZIP" ffprobe > "$ROOT_DIR/ffprobe"
+chmod 755 "$ROOT_DIR/ffmpeg" "$ROOT_DIR/ffprobe"
+
 # ---------- Generate postinstall ----------
 
 # Pass substitution values via env vars and read them with $ENV{} on the perl
