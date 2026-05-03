@@ -7,6 +7,10 @@ native/runner.sh
 # Logs
 *.log
 
-# .pkg build outputs
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Build outputs (.pkg, .exe, etc.)
 build/
 dist/

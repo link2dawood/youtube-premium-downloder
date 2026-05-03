@@ -9,18 +9,20 @@ const NATIVE_HOST = "com.pixelcatch.downloader";
 
 // --- Helper download endpoints ---
 //
-// Where the popup sends users to grab the right helper installer for their
-// OS. Replace REPO_OWNER / REPO_NAME with your published GitHub repo once you
-// cut a release that has the .pkg / .exe / install-linux.sh as release assets.
-// Until you publish, the buttons will just open the GitHub URL — which 404s
-// until your release exists.
-const HELPER_DOWNLOAD_BASE = "https://github.com/REPO_OWNER/REPO_NAME/releases/latest/download";
+// Points at the published helper installers for each OS. The release assets
+// must be uploaded to the "latest" GitHub release of the repo below for the
+// buttons to actually deliver something:
+//   - PixelCatch-Helper.pkg          (macOS)
+//   - PixelCatch-Helper-Setup.exe    (Windows)
+//   - install-linux.sh               (Linux)
+const HELPER_REPO = "link2dawood/youtube-premium-downloder";
+const HELPER_DOWNLOAD_BASE = `https://github.com/${HELPER_REPO}/releases/latest/download`;
 const HELPER_DOWNLOADS = {
   mac:     `${HELPER_DOWNLOAD_BASE}/PixelCatch-Helper.pkg`,
   windows: `${HELPER_DOWNLOAD_BASE}/PixelCatch-Helper-Setup.exe`,
   linux:   `${HELPER_DOWNLOAD_BASE}/install-linux.sh`,
 };
-const HELPER_HELP_URL = `https://github.com/REPO_OWNER/REPO_NAME#install`;
+const HELPER_HELP_URL = `https://github.com/${HELPER_REPO}/tree/dev#install`;
 
 // How long to wait for the helper to reply to a ping before assuming it's
 // not installed. The native host launches a fresh process per port, so a
@@ -182,9 +184,9 @@ async function checkHelperPresence({ silent = false } = {}) {
 function downloadHelperForPlatform() {
   const plat = detectPlatform();
   const url = HELPER_DOWNLOADS[plat] || HELPER_HELP_URL;
-  if (url.includes("REPO_OWNER")) {
+  if (!HELPER_REPO || HELPER_REPO.includes("REPO_OWNER")) {
     setSetupStatus(
-      "Download URL hasn't been configured yet — open popup.js and replace REPO_OWNER / REPO_NAME with your real GitHub repo before shipping.",
+      "Download URL hasn't been configured yet — open popup.js and set HELPER_REPO to your GitHub <owner>/<repo> before shipping.",
       "error"
     );
     return;
