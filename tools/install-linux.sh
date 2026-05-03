@@ -85,12 +85,10 @@ chmod 755 "$INSTALL_DIR/downloader.py"
 
 YTDLP_BIN="$INSTALL_DIR/yt-dlp"
 ARCH="$(uname -m)"
-case "$ARCH" in
-    x86_64|amd64) YTDLP_ASSET="yt-dlp_linux" ;;
-    aarch64|arm64) YTDLP_ASSET="yt-dlp_linux_aarch64" ;;
-    armv7l|armhf) YTDLP_ASSET="yt-dlp_linux_armv7l" ;;
-    *) YTDLP_ASSET="yt-dlp" ;;  # fallback to portable Python script
-esac
+# Default to the portable Python zipapp — uses the user's system Python 3,
+# which every distro ships, and avoids any cross-distro libc/libssl issues
+# that occasionally bite the platform-specific PyInstaller bundles.
+YTDLP_ASSET="yt-dlp"
 
 if [ "$SKIP_DOWNLOAD" -eq 1 ]; then
     echo "Skipping yt-dlp download (--skip-ytdlp-download)."

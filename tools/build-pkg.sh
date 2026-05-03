@@ -63,8 +63,15 @@ PKG_TOOLS_DIR="$REPO_ROOT/tools/pkg"
 POSTINSTALL_TEMPLATE="$PKG_TOOLS_DIR/scripts/postinstall.template"
 DISTRIBUTION_TEMPLATE="$PKG_TOOLS_DIR/Distribution.xml"
 
-YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
-YTDLP_CACHE="$CACHE_DIR/yt-dlp_macos"
+# We deliberately use the yt-dlp zipapp (single-file Python script) here
+# rather than the yt-dlp_macos PyInstaller binary. The PyInstaller bundle
+# extracts its own Python.framework to a temp dir at runtime, and macOS 15
+# (Sequoia) Gatekeeper independently verifies that extracted framework —
+# which is unsigned/unnotarized, so it gets killed and the helper exits 255.
+# The zipapp uses system Python (provided by Xcode CLT, which ships 3.9+ on
+# every supported macOS) and skirts the whole problem.
+YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+YTDLP_CACHE="$CACHE_DIR/yt-dlp"
 
 # ---------- Build allowed_origins JSON ----------
 
