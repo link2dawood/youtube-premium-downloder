@@ -16,7 +16,15 @@ These resolve to whatever asset is named exactly that on whatever release you've
 
 ---
 
-## One-time setup: cut your first release
+## The easy way: GitHub Actions does it for you
+
+The repo ships `.github/workflows/release.yml`, which runs whenever you push a tag like `v1.0.0`. It:
+
+1. Builds `PixelCatch-Helper.pkg` on a macOS runner.
+2. Builds `PixelCatch-Helper-Setup.exe` on a Windows runner (with Inno Setup auto-installed).
+3. Creates the GitHub Release and attaches all three files (`.pkg`, `.exe`, `install-linux.sh`).
+
+You don't need a Mac, you don't need a Windows machine, you don't need Inno Setup. You just push a tag.
 
 ### Step 1 — push your code to GitHub
 
@@ -24,7 +32,44 @@ These resolve to whatever asset is named exactly that on whatever release you've
 git push origin dev
 ```
 
-(I haven't pushed for you. Your `dev` branch is one commit ahead of `origin/dev`.)
+### Step 2 — tag and push
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+### Step 3 — watch the build run
+
+Open https://github.com/link2dawood/youtube-premium-downloder/actions and you'll see "Release helper packages" running. Takes ~5 minutes (the macOS runner is the slowest because of the Inno Setup install on the Windows side runs in parallel).
+
+### Step 4 — done
+
+Your release appears at https://github.com/link2dawood/youtube-premium-downloder/releases/latest with the .pkg, .exe, and install-linux.sh attached. The popup download buttons start working immediately.
+
+### Verify
+
+Paste this in a browser tab:
+
+```
+https://github.com/link2dawood/youtube-premium-downloder/releases/latest/download/PixelCatch-Helper.pkg
+```
+
+If GitHub starts downloading the .pkg, you're done. Repeat for `PixelCatch-Helper-Setup.exe` and `install-linux.sh`.
+
+### Triggering without a tag (e.g. for a draft preview build)
+
+Open the Actions tab → "Release helper packages" → "Run workflow." Pick the version label and whether to mark the release as a draft. This is useful for testing the build pipeline without cutting a real public release.
+
+---
+
+## The manual way (only if you don't want to use Actions)
+
+### Step 1 — push your code to GitHub
+
+```bash
+git push origin dev
+```
 
 ### Step 2 — build the macOS .pkg
 
@@ -34,63 +79,29 @@ On your Mac:
 ./tools/build-pkg.sh --extension-id <your-extension-id>
 ```
 
-You get two files in `dist/`:
-
-```
-dist/PixelCatch-Helper-1.0.0.pkg     ← versioned (keep for archives)
-dist/PixelCatch-Helper.pkg           ← unversioned (this is what the popup downloads)
-```
-
-Upload **both** to the release in step 5.
+Output: `dist/PixelCatch-Helper.pkg` and `dist/PixelCatch-Helper-1.0.0.pkg`.
 
 ### Step 3 — build the Windows .exe
 
-On a Windows machine with [Inno Setup 6](https://jrsoftware.org/isdl.php) installed:
+This **must** run on a Windows machine. Inno Setup is Windows-only — there is no macOS or Linux version. On a Windows box with [Inno Setup 6](https://jrsoftware.org/isdl.php) installed:
 
 ```powershell
 .\tools\build-win.ps1 -ExtensionId <your-extension-id>
 ```
 
-You get:
+If you don't have a Windows machine, **use the GitHub Actions workflow above** — that's exactly what it solves.
 
-```
-dist\PixelCatch-Helper-Setup-1.0.0.exe     ← versioned
-dist\PixelCatch-Helper-Setup.exe           ← unversioned (what the popup downloads)
-```
+### Step 4 — Linux installer (already in the repo)
 
-If you don't have a Windows machine, you can skip this for the first release — the macOS button will work, and Windows users will just see a "release exists but doesn't have this file" 404 until you cut a release with the .exe added. Better to do both before launching.
+`tools/install-linux.sh` is uploaded as-is.
 
-### Step 4 — Linux installer (already in the repo, no build needed)
+### Step 5 — create the GitHub release manually
 
-The Linux installer is `tools/install-linux.sh`. Just upload that file as-is to the release.
-
-### Step 5 — create the GitHub release
-
-1. Open https://github.com/link2dawood/youtube-premium-downloder/releases/new in your browser.
-2. **Choose a tag**: type `v1.0.0` and click "Create new tag: v1.0.0 on publish."
-3. **Target**: pick `dev` (since you don't want to merge to main yet — GitHub releases can be cut from any branch).
-4. **Release title**: "PixelCatch 1.0.0"
-5. **Description**: paste the short release notes (template below).
-6. **Attach files**: drag these into the "Attach binaries" area:
-   - `dist/PixelCatch-Helper.pkg` (unversioned, REQUIRED — popup hits this)
-   - `dist/PixelCatch-Helper-1.0.0.pkg` (versioned, optional but nice)
-   - `dist/PixelCatch-Helper-Setup.exe` (unversioned, REQUIRED for Windows users)
-   - `dist/PixelCatch-Helper-Setup-1.0.0.exe` (versioned, optional)
-   - `tools/install-linux.sh` (REQUIRED for Linux users)
-7. Make sure **"Set as the latest release"** is checked.
-8. Click **Publish release**.
-
-The popup buttons start working the moment you click Publish.
-
-### Step 6 — verify
-
-In a fresh browser tab, paste:
-
-```
-https://github.com/link2dawood/youtube-premium-downloder/releases/latest/download/PixelCatch-Helper.pkg
-```
-
-If GitHub starts downloading the .pkg, the popup is now wired up correctly. Repeat for the .exe and install-linux.sh URLs.
+1. Open https://github.com/link2dawood/youtube-premium-downloder/releases/new
+2. Tag: `v1.0.0`. Target: `dev`.
+3. Release title: `PixelCatch 1.0.0`.
+4. Drag in: `PixelCatch-Helper.pkg`, `PixelCatch-Helper-Setup.exe`, `install-linux.sh`.
+5. Set as latest. Publish.
 
 ---
 

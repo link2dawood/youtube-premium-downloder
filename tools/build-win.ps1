@@ -43,6 +43,31 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Inno Setup is Windows-only — running this on macOS/Linux can't possibly
+# succeed. Catch that early with a clear message instead of failing later
+# when Test-Path on the (Windows-only) ISCC.exe path fails.
+if ($IsLinux -or $IsMacOS) {
+    $platform = if ($IsMacOS) { "macOS" } else { "Linux" }
+    Write-Host "" -ForegroundColor Yellow
+    Write-Host "build-win.ps1 must run on Windows." -ForegroundColor Yellow
+    Write-Host "  Current platform: $platform"
+    Write-Host "  Inno Setup (the .exe builder this script invokes) is Windows-only."
+    Write-Host ""
+    Write-Host "Three options:" -ForegroundColor Yellow
+    Write-Host "  1. (Recommended) Push a tag like v1.0.0 to GitHub. The repo's"
+    Write-Host "     .github/workflows/release.yml builds the .exe on a Windows runner"
+    Write-Host "     for you and creates the GitHub release automatically."
+    Write-Host "       git tag v1.0.0"
+    Write-Host "       git push origin v1.0.0"
+    Write-Host ""
+    Write-Host "  2. Run this script inside a Windows VM (Parallels, UTM, Boot Camp)"
+    Write-Host "     with Inno Setup 6 installed."
+    Write-Host ""
+    Write-Host "  3. Run on a Windows machine you have access to."
+    Write-Host ""
+    exit 1
+}
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ToolsDir = Join-Path $RepoRoot "tools"
 $WinDir = Join-Path $ToolsDir "win"

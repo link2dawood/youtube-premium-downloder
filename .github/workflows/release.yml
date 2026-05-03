@@ -1,0 +1,169 @@
+# PixelCatch — release workflow.
+#
+# Builds the macOS .pkg on a macOS runner and the Windows .exe on a Windows
+# runner (with Inno Setup), then creates a GitHub Release with both installers
+# + the Linux install script attached.
+#
+# Two ways to trigger:
+#
+#   1. Push a tag like v1.0.0 (recommended for real releases):
+#        git tag v1.0.0
+#        git push origin v1.0.0
+#
+#   2. From the Actions tab → "Release helper packages" → Run workflow.
+#      Lets you build a release on demand without tagging.
+#
+# Requires zero setup beyond enabling Actions on the repo. The extension ID
+# is hardcoded below — change it if you ever rotate to a new one.
+
+name: Release helper packages
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label (e.g. 1.0.0). Used in filenames."
+        required: true
+        default: "1.0.0"
+      extension_id:
+        description: "Chrome extension ID(s), comma-separated."
+        required: true
+        default: "njmhphecbkmjeffkfajonhfmfiammnnn"
+      draft:
+        description: "Create the release as a draft (don't publish yet)."
+        type: boolean
+        default: true
+
+# These let the workflow create releases / upload assets on the repo.
+permissions:
+  contents: write
+
+env:
+  EXTENSION_ID: njmhphecbkmjeffkfajonhfmfiammnnn
+
+jobs:
+  # ---------- Resolve version ----------
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set.outputs.version }}
+      extension_id: ${{ steps.set.outputs.extension_id }}
+    steps:
+      - id: set
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "extension_id=${{ inputs.extension_id }}" >> "$GITHUB_OUTPUT"
+          else
+            # Strip leading "v" from tag (v1.0.0 -> 1.0.0)
+            tag="${GITHUB_REF##*/}"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+            echo "extension_id=${{ env.EXTENSION_ID }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------- macOS .pkg ----------
+  build-mac:
+    needs: meta
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build .pkg
+        run: |
+          chmod +x tools/build-pkg.sh
+          ./tools/build-pkg.sh \
+            --extension-id "${{ needs.meta.outputs.extension_id }}" \
+            --version "${{ needs.meta.outputs.version }}"
+
+      - name: Show output
+        run: ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg
+          path: dist/PixelCatch-Helper*.pkg
+          if-no-files-found: error
+
+  # ---------- Windows .exe ----------
+  build-win:
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build .exe
+        shell: pwsh
+        run: |
+          .\tools\build-win.ps1 `
+            -ExtensionId "${{ needs.meta.outputs.extension_id }}" `
+            -Version     "${{ needs.meta.outputs.version }}"
+
+      - name: Show output
+        run: dir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/PixelCatch-Helper-Setup*.exe
+          if-no-files-found: error
+
+  # ---------- Publish GitHub Release ----------
+  release:
+    needs: [meta, build-mac, build-win]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-pkg
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: dist
+
+      - name: Stage Linux installer alongside other assets
+        run: cp tools/install-linux.sh dist/install-linux.sh
+
+      - name: List release assets
+        run: ls -la dist/
+
+      - name: Create / update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          # When triggered by a tag push, action-gh-release picks the tag from
+          # the ref. For workflow_dispatch we point it at a constructed tag.
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', needs.meta.outputs.version) || github.ref_name }}
+          name: PixelCatch ${{ needs.meta.outputs.version }}
+          body: |
+            Automated release built by `.github/workflows/release.yml`.
+
+            ## Install
+
+            - **macOS**: download `PixelCatch-Helper.pkg`, double-click, enter your admin password.
+            - **Windows**: download `PixelCatch-Helper-Setup.exe`, double-click, click through the wizard.
+            - **Linux**: download `install-linux.sh`, then run:
+              `bash install-linux.sh --extension-id <your-extension-id>`
+
+            After the helper is installed, install the PixelCatch Chrome extension and click its icon — it auto-detects the helper.
+
+            ## Requirements
+
+            - A signed-in YouTube account in Chrome.
+            - Channel membership for members-only videos; YouTube Premium for the enhanced 1080p stream.
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/PixelCatch-Helper.pkg
+            dist/PixelCatch-Helper-${{ needs.meta.outputs.version }}.pkg
+            dist/PixelCatch-Helper-Setup.exe
+            dist/PixelCatch-Helper-Setup-${{ needs.meta.outputs.version }}.exe
+            dist/install-linux.sh
