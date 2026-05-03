@@ -66,6 +66,22 @@ chmod 755 "$RUNNER"
 chmod 755 "$INSTALL_DIR/downloader.py"
 chmod 755 "$INSTALL_DIR/yt-dlp"
 
+# --- 2a. Strip the macOS quarantine attribute from the installed files. ---
+#
+# When the user double-clicks a .pkg they downloaded from the internet, every
+# file the .pkg drops on disk inherits the com.apple.quarantine extended
+# attribute from the .pkg itself. That's normally fine for static assets, but
+# yt-dlp_macos is a PyInstaller-bundled binary that extracts an internal
+# Python.framework on first run — and Gatekeeper checks that extracted
+# framework against the parent process's quarantine status. With the
+# attribute set, yt-dlp gets killed and reports exit 255 with no useful
+# error, which is impossible for users to debug.
+#
+# We just installed these files ourselves as root, so we know they're trusted
+# locally. Strip the attribute. (`xattr -dr` is recursive and silent on files
+# that don't have the attribute set, so it's safe to run unconditionally.)
+xattr -dr com.apple.quarantine "$INSTALL_DIR" 2>/dev/null || true
+
 # --- 3. Write the Chrome native messaging host manifest. ---
 mkdir -p "$NMH_SYSTEM_DIR"
 chmod 755 "$NMH_SYSTEM_DIR"

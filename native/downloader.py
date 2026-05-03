@@ -547,10 +547,25 @@ def run_download(url, download_path, ytdlp, fmt, format_key):
             ),
         })
     else:
-        send_message({
-            "type": "error",
-            "error": last_error or f"yt-dlp exited with code {proc.returncode}.",
-        })
+        error_msg = last_error or f"yt-dlp exited with code {proc.returncode}."
+
+        # On macOS, exit 255 with no captured error is almost always Gatekeeper
+        # killing the bundled Python.framework inside yt-dlp because the .pkg
+        # was downloaded from the internet and its quarantine flag propagated
+        # to the installed files. Surface the one-line fix instead of leaving
+        # the user staring at a number.
+        if (
+            IS_MAC
+            and proc.returncode == 255
+            and not last_error
+        ):
+            error_msg += (
+                " On macOS this is usually Gatekeeper blocking yt-dlp's bundled"
+                " Python. Fix: open Terminal and run "
+                'sudo xattr -dr com.apple.quarantine "/Library/Application Support/PixelCatch"'
+            )
+
+        send_message({"type": "error", "error": error_msg})
 
 
 # ---------- Entry point ----------
