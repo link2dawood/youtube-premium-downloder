@@ -1,0 +1,110 @@
+#!/bin/bash
+#
+# PixelCatch Helper postinstall.
+#
+# Runs as root immediately after the .pkg payload is unpacked into
+# /Library/Application Support/PixelCatch/. Responsibilities:
+#   - Verify Python 3 is present (downloader.py needs it; yt-dlp itself is
+#     bundled as a standalone binary so it doesn't need Python).
+#   - Generate runner.sh with absolute Python + helper paths baked in, since
+#     Chrome launches the native host with a stripped PATH.
+#   - Write the system-wide Chrome native-messaging manifest pointing at
+#     runner.sh, with the extension ID(s) baked in at build time.
+#   - Clean up legacy manifest files from earlier versions.
+#
+# Build-time substitutions (replaced by tools/build-pkg.sh):
+#   __ALLOWED_ORIGINS__   -- comma-separated JSON list of chrome-extension URLs
+#   __VERSION__           -- helper version, e.g. "1.0.0"
+#
+set -euo pipefail
+
+INSTALL_DIR="/Library/Application Support/PixelCatch"
+NMH_SYSTEM_DIR="/Library/Google/Chrome/NativeMessagingHosts"
+HOST_NAME="com.pixelcatch.downloader"
+LOG_DIR="/Library/Logs/PixelCatch"
+
+# --- 1. Find a working Python 3. ---
+PYTHON3=""
+for candidate in /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    if [ -x "$candidate" ]; then
+        # /usr/bin/python3 on macOS is a stub that prompts CLT install when
+        # called; verify it actually executes by running a one-liner.
+        if "$candidate" -c "import sys; sys.exit(0)" >/dev/null 2>&1; then
+            PYTHON3="$candidate"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON3" ]; then
+    osascript <<'OSA' >/dev/null 2>&1 || true
+display dialog "PixelCatch needs Python 3 to run.
+
+Please install the Xcode Command Line Tools (free, from Apple) by opening Terminal and running:
+
+    xcode-select --install
+
+After it finishes, re-run the PixelCatch Helper installer." buttons {"OK"} default button "OK" with icon stop with title "PixelCatch Helper"
+OSA
+    echo "Python 3 not found; aborting." >&2
+    exit 1
+fi
+
+# --- 2. Generate runner.sh ---
+# Chrome launches native messaging hosts with a minimal PATH, so we bake the
+# install dir on the front (so shutil.which("yt-dlp") in downloader.py finds
+# the bundled binary) and use absolute Python.
+RUNNER="$INSTALL_DIR/runner.sh"
+cat > "$RUNNER" <<RUNNER_EOF
+#!/bin/bash
+set -e
+export PATH="$INSTALL_DIR:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:\${PATH:-}"
+exec "$PYTHON3" "$INSTALL_DIR/downloader.py"
+RUNNER_EOF
+chmod 755 "$RUNNER"
+
+chmod 755 "$INSTALL_DIR/downloader.py"
+chmod 755 "$INSTALL_DIR/yt-dlp"
+
+# --- 3. Write the Chrome native messaging host manifest. ---
+mkdir -p "$NMH_SYSTEM_DIR"
+chmod 755 "$NMH_SYSTEM_DIR"
+
+cat > "$NMH_SYSTEM_DIR/$HOST_NAME.json" <<MANIFEST_EOF
+{
+  "name": "$HOST_NAME",
+  "description": "PixelCatch YouTube downloader native host (v__VERSION__)",
+  "path": "$RUNNER",
+  "type": "stdio",
+  "allowed_origins": [
+    __ALLOWED_ORIGINS__
+  ]
+}
+MANIFEST_EOF
+chmod 644 "$NMH_SYSTEM_DIR/$HOST_NAME.json"
+
+# --- 4. Log directory (downloader.py also creates ~/Library/Logs/... per user;
+# this system-wide dir is only used if the user later opts to redirect logs).
+mkdir -p "$LOG_DIR"
+chmod 1777 "$LOG_DIR"  # sticky, world-writable like /tmp
+
+# --- 5. Remove legacy manifests from prior versions. ---
+LEGACY_NAMES=(
+    "com.extension.ytdownloader.json"
+)
+for legacy in "${LEGACY_NAMES[@]}"; do
+    [ -f "$NMH_SYSTEM_DIR/$legacy" ] && rm -f "$NMH_SYSTEM_DIR/$legacy" || true
+done
+
+# Best-effort cleanup of the per-user legacy manifest the install.sh script
+# used to write. Postinstall runs as root so we walk every user's home dir.
+for home in /Users/*; do
+    [ -d "$home" ] || continue
+    user_nmh="$home/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+    [ -d "$user_nmh" ] || continue
+    for legacy in "${LEGACY_NAMES[@]}"; do
+        [ -f "$user_nmh/$legacy" ] && rm -f "$user_nmh/$legacy" || true
+    done
+done
+
+exit 0

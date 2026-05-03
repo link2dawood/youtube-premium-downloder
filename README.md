@@ -1,223 +1,174 @@
 # PixelCatch
 
-PixelCatch is a Chrome extension that helps users download YouTube videos in multiple available resolutions through a clean and simple interface.
+A Chrome extension purpose-built for downloading **YouTube Premium quality streams and channel members-only videos**, at any resolution from 480p up to **4K (2160p)**, or audio-only. All processing is local — there's no remote server, no analytics, no Google account integration. Authentication happens through the YouTube cookies in your existing signed-in Chrome session.
 
-## Features
+## What this is for
 
-- Download YouTube videos directly from the browser
-- Supports multiple available video resolutions
-- Clean and lightweight Chrome extension experience
-- Native messaging integration for local processing
-- Powered by `yt-dlp` for reliable video extraction and downloads
+The use cases this extension is designed around:
 
-## How It Works
+- Downloading videos from channels you're a paying member of (members-only / "join" content)
+- Downloading at the **Premium-tier 1080p enhanced bitrate** when you have a YouTube Premium subscription
+- Pulling 4K (2160p) and 2K (1440p) streams in their original VP9/AV1 quality
+- Saving audio-only m4a tracks for music or podcasts
 
-PixelCatch uses a Chrome extension interface together with a native messaging host on your local machine.
+If you don't have an active membership / Premium subscription, the extension will still download whatever the public can see — it just won't unlock the gated content.
 
-Flow:
+## Quality presets
 
-1. The Chrome extension detects the active YouTube video
-2. The extension sends a request to the native host
-3. The native host runs a Python script
-4. The Python script uses `yt-dlp` to fetch and download the selected video resolution
+| Preset | What it picks |
+|---|---|
+| **Best available** | The highest-quality video + audio your account has access to. Picks Premium streams when present. |
+| **4K (2160p)** | Up to 2160p, typically VP9 or AV1 in webm; merged to mkv if mp4 isn't possible. |
+| **2K (1440p)** | Up to 1440p. |
+| **1080p (Full HD)** | Up to 1080p. With Premium, picks the enhanced-bitrate 1080p stream when available. |
+| **720p (HD)** | Up to 720p. |
+| **480p (SD)** | Up to 480p. |
+| **Audio only** | Bestaudio, prefers m4a; falls back to whatever container yt-dlp picks. |
 
-## Included
+The extension never locks the container to mp4 for video presets, because YouTube doesn't ship 4K/1440p as mp4 — that constraint would silently downgrade your download to 1080p. Output is mp4 when codecs allow, mkv otherwise.
 
-- `manifest.json` for MV3
-- popup UI in `popup/`
-- background service worker in `background/`
-- `chrome.storage.local` wrapper in `src/lib/storage.js`
-- environment config for Google OAuth client ID in `src/config/env.js`
-- Google sign-in flow using `chrome.identity.getAuthToken({ interactive: true })`
-- sign-out, token revoke, and reconnect flow
-- Gmail module in `src/gmail/`
-- background handlers for profile, messages, drafts, labels, and send flows
-- normalized Gmail API error handling for expired tokens, insufficient scopes, and quota errors
-- YouTube URL launcher in the popup with recent-link history
-- compliant YouTube Studio shortcut for creators downloading their own uploads
-- clearer auth loading, failure, and token refresh states
-- options-page privacy notice
+## How it works
 
-## YouTube Launcher
-
-The popup now supports:
-
-- pasting a YouTube URL
-- validating supported YouTube formats
-- opening the video in a new tab with `chrome.tabs.create()`
-- saving recent links in `chrome.storage.local`
-- reopening the last saved video with one click
-- opening the official YouTube Studio workflow for creator-owned uploads
-
-Supported formats include common `youtube.com/watch`, `youtu.be`, `shorts`, `live`, and `embed` URLs. The popup stores the five most recent videos and normalizes them to `https://www.youtube.com/watch?v=...`.
-
-## YouTube Download Compliance
-
-The popup now includes an `Open in YouTube Studio` button and helper text that points users to YouTube's official creator workflow for downloading videos they uploaded themselves.
-
-Per YouTube Help, creators can download their own uploaded videos in YouTube Studio by:
-
-1. Signing in to YouTube Studio
-2. Opening `Content`
-3. Selecting the video menu
-4. Choosing `Download`
-
-The extension does not download YouTube videos directly.
-
-## UX And Security
-
-The popup now surfaces:
-
-- signed-in email
-- granted scopes
-- token refresh status
-- last token status check time
-- clearer loading and failure messaging
-
-Security posture in this phase:
-
-- raw OAuth access tokens are not persisted to `chrome.storage.local`
-- permissions remain narrow and unchanged beyond what the current feature set needs
-- the extension now includes a privacy notice in `options/options.html`
-
-## Gmail Module Surface
-
-The background service worker now exposes these runtime message types:
-
-- `gmail:get-profile`
-- `gmail:list-messages`
-- `gmail:get-message`
-- `gmail:send-message`
-- `gmail:create-draft`
-- `gmail:list-labels`
-
-The Gmail client is implemented in `src/gmail/api.js`, with MIME message helpers in `src/gmail/mime.js`.
-
-## OAuth Scope Model
-
-This extension uses the smallest scope set needed for the current Gmail feature list:
-
-- `https://www.googleapis.com/auth/gmail.readonly`
-  Used for `getProfile`, `listMessages`, `getMessage`, and `listLabels`
-- `https://www.googleapis.com/auth/gmail.compose`
-  Used for `createDraft` and `sendMessage`
-
-This avoids broader scopes like `gmail.modify` and `https://mail.google.com/`.
-
-## Configure Google OAuth For A Chrome Extension
-
-Chrome and Google require a few manual steps outside the repo before the auth flow will work.
-
-### 1. Keep a stable extension ID
-
-1. Zip the extension folder and upload it as an unpublished item in the Chrome Developer Dashboard
-2. Open the Package tab and copy the public key
-3. Add that value to the `key` field in `manifest.json` if you want the unpacked extension ID to stay stable during development
-4. Confirm the unpacked ID in `chrome://extensions` matches the dashboard item ID
-
-### 2. Configure the Google Auth Platform
-
-1. Create or select a Google Cloud project
-2. Open Google Auth Platform and fill in the Branding page
-3. Set the audience for your app
-4. Enable the Gmail API in the API Library
-5. Add the Gmail scope your extension uses: `https://www.googleapis.com/auth/gmail.readonly`
-6. Add the compose scope used for drafts and send: `https://www.googleapis.com/auth/gmail.compose`
-
-If you use external users or sensitive Gmail scopes in production, Google may require verification before removing the unverified app screen.
-
-### 3. Create OAuth credentials for the extension
-
-1. In Google Auth Platform, open Clients
-2. Create a new OAuth client
-3. Choose the Chrome Extension application type
-4. Enter your extension item ID
-5. Copy the generated client ID
-
-### 4. Add the client ID to the extension
-
-Replace `__GOOGLE_OAUTH_CLIENT_ID__` in both files:
-
-- `manifest.json`
-- `src/config/env.js`
-
-Example:
-
-```js
-const ENV = Object.freeze({
-  GOOGLE_OAUTH_CLIENT_ID: "1234567890-abc123def456.apps.googleusercontent.com"
-});
+```
+┌──────────────┐    connectNative     ┌──────────────────────┐
+│ popup/popup.js │ ───────────────────▶ │ native/downloader.py │ ──▶ yt-dlp ──▶ youtube.com
+└──────────────┘   stdio (NM frames)  └──────────────────────┘     ▲
+       ▲                                          │                │
+       │       progress / done / error            │      Chrome cookies
+       └──────────────────────────────────────────┘    (your YouTube session)
 ```
 
-And in `manifest.json`:
+1. The popup validates the YouTube URL and the quality preset locally.
+2. It opens a Chrome native messaging port to `com.pixelcatch.downloader`.
+3. The Python host re-validates everything against an allow-list, then runs `yt-dlp` and streams progress events back to the popup.
+4. `yt-dlp` reads your YouTube cookies from your default Chrome profile so members-only / Premium content is accessible.
+5. The host writes the file to `~/Downloads` (configurable to `~/Movies` or `~/Videos` via the message payload — anything else is rejected).
 
-```json
-"oauth2": {
-  "client_id": "1234567890-abc123def456.apps.googleusercontent.com",
-  "scopes": [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.compose"
-  ]
-}
+## Install
+
+PixelCatch runs on **macOS, Windows, and Linux**. Chrome, Chromium, Brave, Microsoft Edge, and Vivaldi are all supported.
+
+### Step 1 — load the extension (same on every OS)
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked** and select this folder
+4. Copy the extension ID Chrome assigns
+
+### Step 2 — install the helper
+
+The Chrome extension talks to a small local helper that runs `yt-dlp`. Pick the installer for your operating system:
+
+#### macOS
+
+Double-click `dist/PixelCatch-Helper-<version>.pkg`. Enter your admin password. Done.
+
+You only need to **build** the `.pkg` once on your own machine:
+```bash
+./tools/build-pkg.sh --extension-id <your-extension-id>
+```
+After that the same `.pkg` works for any user you share it with.
+
+#### Windows
+
+Double-click `dist\PixelCatch-Helper-Setup-<version>.exe`. Click through the wizard. Done.
+
+To **build** the `.exe`, on a Windows machine with [Inno Setup 6](https://jrsoftware.org/isdl.php) installed:
+```powershell
+.\tools\build-win.ps1 -ExtensionId <your-extension-id>
+```
+The installer bundles a portable Python and `yt-dlp.exe` — users don't need to install anything else.
+
+Power users can skip the `.exe` and run a PowerShell installer instead:
+```powershell
+.\tools\install-windows.ps1 -ExtensionId <your-extension-id>
 ```
 
-## Load The Extension
+#### Linux
 
-1. Open Chrome and go to `chrome://extensions`
-2. Enable Developer mode
-3. Click Load unpacked
-4. Select this folder
-
-## Test The Auth Flow
-
-1. Open the popup
-2. Click `Connect Google`
-3. Approve the OAuth prompt
-4. Confirm the popup shows a connected Gmail account
-5. Click `Sign Out` to clear cached auth state and revoke the token
-6. Click `Reconnect` to run the interactive flow again
-
-The popup still tracks open count and stores a small note in local storage, and now also exercises the standard Chrome extension auth flow through the background service worker.
-
-## Gmail Request Examples
-
-Read mailbox metadata:
-
-```js
-await chrome.runtime.sendMessage({ type: "gmail:get-profile" });
-await chrome.runtime.sendMessage({
-  type: "gmail:list-messages",
-  payload: { maxResults: 10, query: "label:inbox" }
-});
-await chrome.runtime.sendMessage({
-  type: "gmail:get-message",
-  payload: { id: "MESSAGE_ID", format: "full" }
-});
-await chrome.runtime.sendMessage({ type: "gmail:list-labels" });
+```bash
+./tools/install-linux.sh --extension-id <your-extension-id>
 ```
 
-Create a draft or send a message:
+Per-user install (no `sudo`). Auto-detects every Chromium-family browser you have installed and registers with each one. Downloads the right `yt-dlp` binary for your architecture.
 
-```js
-await chrome.runtime.sendMessage({
-  type: "gmail:create-draft",
-  payload: {
-    interactive: true,
-    to: "[email protected]",
-    subject: "Draft subject",
-    bodyText: "Hello from the extension."
-  }
-});
+Requires Python 3 in PATH (every modern distro has it).
 
-await chrome.runtime.sendMessage({
-  type: "gmail:send-message",
-  payload: {
-    interactive: true,
-    to: "[email protected]",
-    subject: "Sent from the extension",
-    bodyText: "Hello from the extension."
-  }
-});
+### Step 3 — reload the extension
+
+Click the refresh icon next to PixelCatch on `chrome://extensions`. You're done.
+
+## Use
+
+1. Make sure you're signed in to YouTube in Chrome (and a member / Premium subscriber if downloading gated content).
+2. Click the toolbar icon to open the panel.
+3. Paste the YouTube URL — including members-only video URLs.
+4. Pick a quality preset.
+5. Click **Download**.
+
+The file lands in `~/Downloads`.
+
+If you see "Join this channel to get access to members-only content" in the error message, your Chrome session isn't recognized as a member of that channel. Open the video in Chrome, confirm you can play it there, then retry.
+
+## Permissions
+
+| Permission | Why |
+|---|---|
+| `nativeMessaging` | Talk to the local `yt-dlp` helper |
+| `storage` | Remember recent downloads in `chrome.storage.local` |
+| `windows` | Open the popup as a free-floating panel |
+
+There is intentionally no `tabs`, `cookies`, `identity`, or host permission. The extension never reads tab content and never talks to a remote server.
+
+## Privacy & security
+
+- **Local-only.** All downloads happen on your machine. PixelCatch makes no network requests outside of `yt-dlp`'s call to YouTube.
+- **Cookie scoping.** The native host invokes `yt-dlp --cookies-from-browser chrome`. yt-dlp parses the on-disk cookie database to extract YouTube auth, but in HTTP requests only `youtube.com` cookies are sent — that's standard cookie scoping enforced by yt-dlp's HTTP layer. If you'd prefer not to grant disk access to the full cookie store, you can export a `youtube.com`-only `cookies.txt` from a browser extension and we can extend the host to accept that as input.
+- **Defense in depth.** Both the popup and the native host independently validate the URL host, the quality preset, and the download path. The host's `FORMAT_PRESETS` map is the only set of `yt-dlp -f` strings ever passed to the subprocess — there's no path for arbitrary format DSL to reach `yt-dlp`.
+- **Player client.** The host pins `--extractor-args youtube:player_client=web`. The `web` client is the only one that consistently respects auth cookies, which is what unlocks members-only and Premium content. Earlier configurations included `ios`, which silently ignored cookies and made the extension useless for its actual purpose.
+- **Logs.** Written to `~/Library/Logs/com.pixelcatch.downloader.log` with mode `0600` (readable only by you).
+- **No identity, no Gmail, no OAuth.** Earlier scaffolding for a Gmail integration has been removed entirely.
+
+## Stable extension ID
+
+Without a manifest `key`, Chrome assigns the unpacked extension a per-machine ID. Each time you reload on a new profile or machine, you must re-run `./native/install.sh <new-id>` so the native host's `allowed_origins` matches.
+
+To make the ID stable across machines, upload the extension once as an unpublished item in the Chrome Web Store dashboard, copy the public key from the Package tab, and add it to `manifest.json` as `"key": "..."`.
+
+## Development
+
+```
+.
+├── manifest.json
+├── background/service-worker.js   # opens the panel window
+├── popup/                         # UI + native-messaging client
+├── options/                       # privacy notice page
+├── src/lib/storage.js             # tiny chrome.storage.local wrapper
+├── native/
+│   ├── downloader.py              # native messaging host
+│   ├── install.sh                 # registers the host with Chrome
+│   ├── runner.sh                  # generated by install.sh (gitignored)
+│   └── manifest.template.json
+└── tests/test_validation.py       # pytest suite for the host's validators
 ```
 
-Compose actions accept either structured fields like `to`, `subject`, `bodyText`, and `bodyHtml`, or a prebuilt base64url-encoded `raw` MIME message.
+### Run the tests
+
+```bash
+pip install pytest
+pytest -q
+```
+
+The suite covers the URL allow-list, the format enum (including 2K/4K and audio-only), the no-mp4-lock invariant for video presets, the download-path whitelist, and the progress parser. It does **not** invoke `yt-dlp` — that's covered by manual testing.
+
+### Manual testing checklist
+
+- [ ] Sign in to YouTube in Chrome with a Premium-active account; download a 1080p video and inspect the bitrate (should be Premium-tier).
+- [ ] Sign in to a channel you're a member of; download a members-only video; confirm it succeeds.
+- [ ] Sign out (or use a non-Premium account); download the same members-only URL; confirm a clean error message.
+- [ ] Download a 4K-uploaded video at the **4K** preset; confirm the file is 2160p (use `mediainfo` or `ffprobe`).
+- [ ] Download with **Audio only**; confirm the file is m4a/opus and there is no video stream.
+- [ ] Try a non-YouTube URL — expect "URL host ... is not an allowed YouTube host".
+- [ ] Confirm `~/Library/Logs/com.pixelcatch.downloader.log` exists with mode `600`.
+- [ ] Confirm nothing is written to `/tmp/`.
+- [ ] Close the popup mid-download — confirm the host exits cleanly.

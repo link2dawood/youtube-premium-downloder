@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<installer-gui-script minSpecVersion="2">
+    <title>PixelCatch Helper</title>
+    <organization>com.pixelcatch</organization>
+
+    <welcome file="welcome.html" mime-type="text/html" />
+    <conclusion file="conclusion.html" mime-type="text/html" />
+
+    <!-- Install on the boot volume only; no per-user customization needed. -->
+    <domains enable_localSystem="true" enable_anywhere="false" enable_currentUserHome="false" />
+    <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="x86_64,arm64" />
+
+    <!-- macOS 11 (Big Sur) is the floor — covers Apple Silicon + late-Intel
+         Macs and matches what current Chrome supports. -->
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="11.0"/>
+        </allowed-os-versions>
+    </volume-check>
+
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.pixelcatch.helper" />
+        </line>
+    </choices-outline>
+
+    <choice id="default" />
+    <choice id="com.pixelcatch.helper" visible="false">
+        <pkg-ref id="com.pixelcatch.helper" />
+    </choice>
+
+    <pkg-ref id="com.pixelcatch.helper"
+             version="__VERSION__"
+             onConclusion="none"
+             auth="root">component.pkg</pkg-ref>
+</installer-gui-script>

@@ -3,60 +3,78 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Extension Foundation Privacy Notice</title>
+    <title>PixelCatch — Privacy Notice</title>
     <link rel="stylesheet" href="./options.css" />
   </head>
   <body>
     <main class="page">
       <section class="hero">
         <p class="eyebrow">Privacy Notice</p>
-        <h1>Extension Foundation</h1>
-        <p class="subtitle">How this extension handles Google account data, Gmail access, and saved popup state.</p>
+        <h1>PixelCatch</h1>
+        <p class="subtitle">A local-only downloader for YouTube Premium and members-only videos, up to 4K, or audio. No accounts, no servers, no analytics.</p>
       </section>
 
       <section class="card">
-        <h2>What We Store</h2>
+        <h2>What we store</h2>
         <ul>
-          <li>Your signed-in email and granted OAuth scopes so the popup can show your current auth state.</li>
-          <li>Recent YouTube links you opened from the popup.</li>
-          <li>The popup open counter and optional local note you save yourself.</li>
+          <li>Up to five recent download URLs in <code>chrome.storage.local</code> so you can re-open them quickly.</li>
+          <li>A download log on disk, in the OS-standard location:
+            <ul>
+              <li>macOS: <code>~/Library/Logs/com.pixelcatch.downloader.log</code> (mode <code>0600</code>)</li>
+              <li>Windows: <code>%LOCALAPPDATA%\PixelCatch\downloader.log</code></li>
+              <li>Linux: <code>~/.local/state/pixelcatch/downloader.log</code></li>
+            </ul>
+          </li>
         </ul>
       </section>
 
       <section class="card">
-        <h2>What We Do Not Store</h2>
+        <h2>What we do <em>not</em> do</h2>
         <ul>
-          <li>Raw Google OAuth access tokens are not persisted in <code>chrome.storage.local</code>.</li>
-          <li>Gmail message bodies are not cached by the extension unless you explicitly build your own feature on top of the current API layer.</li>
-          <li>No sync storage, remote analytics, or third-party tracking is included in this scaffold.</li>
+          <li>No remote servers. The extension makes no network requests of its own.</li>
+          <li>No Google account integration, no OAuth, no Gmail access. The extension does not request the <code>identity</code> permission.</li>
+          <li>No analytics, telemetry, or third-party scripts.</li>
+          <li>No reading of tab content or browsing history.</li>
         </ul>
       </section>
 
       <section class="card">
-        <h2>Permissions And Why</h2>
+        <h2>How downloads work</h2>
+        <p>
+          The popup hands a YouTube URL and a quality preset to a small Python helper on your machine via Chrome's native messaging. That helper runs <code>yt-dlp</code> as a subprocess and saves the resulting file to <code>~/Downloads</code> (or <code>~/Movies</code> / <code>~/Videos</code> if you configure that). All processing happens locally.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Cookies and authentication</h2>
+        <p>
+          To download YouTube Premium quality streams and channel members-only videos, the native helper invokes <code>yt-dlp --cookies-from-browser chrome</code>. yt-dlp parses your default Chrome profile's cookie database to extract YouTube authentication. In the actual HTTP requests yt-dlp makes, only <code>youtube.com</code> cookies are sent — that's standard cookie scoping enforced by the HTTP layer.
+        </p>
+        <p>
+          If you'd rather not grant disk access to the full cookie store, you can export a <code>youtube.com</code>-only <code>cookies.txt</code> from any cookie-export browser extension and we can extend the host to accept that file as input instead.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Permissions</h2>
         <ul>
-          <li><code>identity</code> is used for Google sign-in and scope grants through Chrome Identity.</li>
-          <li><code>storage</code> is used for local extension state like auth summaries, recent links, and popup preferences.</li>
-          <li><code>https://gmail.googleapis.com/*</code> is used for Gmail REST API requests you trigger.</li>
-          <li><code>https://accounts.google.com/*</code> is used for Google OAuth and token revoke flows.</li>
+          <li><code>nativeMessaging</code> — talk to the local <code>yt-dlp</code> helper.</li>
+          <li><code>storage</code> — remember your recent downloads.</li>
+          <li><code>windows</code> — open the popup as a free-floating panel.</li>
         </ul>
       </section>
 
       <section class="card">
-        <h2>Scope Model</h2>
+        <h2>User control</h2>
         <ul>
-          <li><code>gmail.readonly</code> is used for profile, message, and label reads.</li>
-          <li><code>gmail.compose</code> is used only for draft and send flows.</li>
-          <li>The scaffold intentionally avoids broader Gmail scopes such as <code>gmail.modify</code> unless a future feature truly needs them.</li>
-        </ul>
-      </section>
-
-      <section class="card">
-        <h2>User Control</h2>
-        <ul>
-          <li>You can sign out from the popup to clear cached auth state and revoke the known token.</li>
-          <li>You can clear popup data from the popup reset action.</li>
-          <li>You can remove the extension entirely from <code>chrome://extensions</code> at any time.</li>
+          <li>Clear recent downloads from the popup at any time.</li>
+          <li>Remove the extension from <code>chrome://extensions</code> at any time. To uninstall the helper:
+            <ul>
+              <li>macOS: <code>sudo ./tools/uninstall-helper.sh</code> (or run the helper's uninstaller from the .pkg).</li>
+              <li>Windows: Settings &rarr; Apps &rarr; PixelCatch Helper &rarr; Uninstall, or <code>./tools/uninstall-windows.ps1</code>.</li>
+              <li>Linux: <code>./tools/uninstall-linux.sh</code>.</li>
+            </ul>
+          </li>
         </ul>
       </section>
     </main>

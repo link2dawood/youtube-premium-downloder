@@ -1,10 +1,34 @@
 import { storage } from "../src/lib/storage.js";
 
 const STORAGE_KEYS = {
-  recentYouTubeLinks: "recentYouTubeLinks"
+  recentYouTubeLinks: "recentYouTubeLinks",
+  signInConfirmed: "signInConfirmedAt"
 };
 
+const NATIVE_HOST = "com.pixelcatch.downloader";
+
+// --- Helper download endpoints ---
+//
+// Where the popup sends users to grab the right helper installer for their
+// OS. Replace REPO_OWNER / REPO_NAME with your published GitHub repo once you
+// cut a release that has the .pkg / .exe / install-linux.sh as release assets.
+// Until you publish, the buttons will just open the GitHub URL — which 404s
+// until your release exists.
+const HELPER_DOWNLOAD_BASE = "https://github.com/REPO_OWNER/REPO_NAME/releases/latest/download";
+const HELPER_DOWNLOADS = {
+  mac:     `${HELPER_DOWNLOAD_BASE}/PixelCatch-Helper.pkg`,
+  windows: `${HELPER_DOWNLOAD_BASE}/PixelCatch-Helper-Setup.exe`,
+  linux:   `${HELPER_DOWNLOAD_BASE}/install-linux.sh`,
+};
+const HELPER_HELP_URL = `https://github.com/REPO_OWNER/REPO_NAME#install`;
+
+// How long to wait for the helper to reply to a ping before assuming it's
+// not installed. The native host launches a fresh process per port, so a
+// generous timeout covers cold-start latency on slow Macs / spinning disks.
+const PING_TIMEOUT_MS = 3000;
+
 const MAX_RECENT_YOUTUBE_LINKS = 5;
+
 const YOUTUBE_HOSTS = new Set([
   "youtu.be",
   "m.youtube.com",
@@ -13,6 +37,16 @@ const YOUTUBE_HOSTS = new Set([
   "www.youtube.com",
   "youtube-nocookie.com",
   "youtube.com"
+]);
+
+const ALLOWED_FORMATS = new Set([
+  "best",
+  "4k",
+  "2k",
+  "1080p",
+  "720p",
+  "480p",
+  "audio"
 ]);
 
 const elements = {
@@ -31,8 +65,170 @@ const elements = {
   recentLinksList: document.querySelector("#recent-links-list"),
   lastVideo: document.querySelector("#last-video"),
   youtubeForm: document.querySelector("#youtube-form"),
-  youtubeUrlInput: document.querySelector("#youtube-url-input")
+  youtubeUrlInput: document.querySelector("#youtube-url-input"),
+  signinBanner: document.querySelector("#signin-banner"),
+  openYouTubeButton: document.querySelector("#open-youtube-button"),
+  confirmSigninButton: document.querySelector("#confirm-signin-button"),
+  setupPanel: document.querySelector("#setup-panel"),
+  setupDownloadButton: document.querySelector("#setup-download-button"),
+  setupRecheckButton: document.querySelector("#setup-recheck-button"),
+  setupHelpButton: document.querySelector("#setup-help-button"),
+  setupPlatformNote: document.querySelector("#setup-platform-note"),
+  setupStatus: document.querySelector("#setup-status"),
+  mainPanel: document.querySelector("#main-panel")
 };
+
+// --- Helper presence detection ---
+//
+// We try to ping the native host on popup open. The host responds with
+// `{type: "pong"}` and exits. If the host isn't installed, Chrome fires
+// onDisconnect with a "not found" lastError. Either way we resolve quickly
+// and decide whether to show the setup panel or the regular UI.
+
+function pingNativeHost(timeoutMs = PING_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    let port;
+    const finish = (result) => {
+      if (resolved) return;
+      resolved = true;
+      try { port?.disconnect(); } catch { /* already disconnected */ }
+      resolve(result);
+    };
+
+    try {
+      port = chrome.runtime.connectNative(NATIVE_HOST);
+    } catch (error) {
+      finish({ ok: false, error: error?.message || String(error) });
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, error: "timeout" });
+    }, timeoutMs);
+
+    port.onMessage.addListener((msg) => {
+      if (msg && msg.type === "pong") {
+        clearTimeout(timer);
+        finish({ ok: true, version: msg.version, platform: msg.platform });
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      clearTimeout(timer);
+      const lastError = chrome.runtime.lastError?.message || "disconnected";
+      finish({ ok: false, error: lastError });
+    });
+
+    try {
+      port.postMessage({ action: "ping" });
+    } catch (error) {
+      clearTimeout(timer);
+      finish({ ok: false, error: error?.message || String(error) });
+    }
+  });
+}
+
+// --- Setup panel ---
+
+function setSetupStatus(text, kind) {
+  elements.setupStatus.textContent = text || "";
+  elements.setupStatus.className = "setup-status" + (kind ? ` ${kind}` : "");
+}
+
+function showSetupPanel(reason) {
+  const plat = detectPlatform();
+  const labels = {
+    mac:     "Download for macOS (.pkg)",
+    windows: "Download for Windows (.exe)",
+    linux:   "Download installer for Linux",
+    unknown: "Download installer",
+  };
+  const notes = {
+    mac:     "Double-click the .pkg, enter your admin password, done.",
+    windows: "Double-click the .exe and click through the wizard.",
+    linux:   "Run the script with your extension ID — see the help link below.",
+    unknown: "See the help link below for your operating system.",
+  };
+  elements.setupDownloadButton.textContent = labels[plat] || labels.unknown;
+  elements.setupPlatformNote.textContent = notes[plat] || notes.unknown;
+
+  // Hide the regular download UI while setup is required.
+  elements.setupPanel.classList.remove("hidden");
+  elements.mainPanel.classList.add("hidden");
+  if (reason === "ping-failed") {
+    setSetupStatus("Helper not detected on this computer.", "");
+  } else {
+    setSetupStatus("");
+  }
+}
+
+function showMainUI() {
+  elements.setupPanel.classList.add("hidden");
+  elements.mainPanel.classList.remove("hidden");
+}
+
+async function checkHelperPresence({ silent = false } = {}) {
+  if (!silent) setSetupStatus("Checking…");
+  const result = await pingNativeHost();
+  if (result.ok) {
+    showMainUI();
+    return result;
+  }
+  showSetupPanel("ping-failed");
+  return result;
+}
+
+function downloadHelperForPlatform() {
+  const plat = detectPlatform();
+  const url = HELPER_DOWNLOADS[plat] || HELPER_HELP_URL;
+  if (url.includes("REPO_OWNER")) {
+    setSetupStatus(
+      "Download URL hasn't been configured yet — open popup.js and replace REPO_OWNER / REPO_NAME with your real GitHub repo before shipping.",
+      "error"
+    );
+    return;
+  }
+  chrome.tabs.create({ url });
+  setSetupStatus("Opened the download in a new tab. Run the installer, then click “check again”.", "");
+}
+
+async function recheckHelper() {
+  setSetupStatus("Checking…");
+  const result = await pingNativeHost();
+  if (result.ok) {
+    setSetupStatus("Helper detected — version " + (result.version || "?") + ". You're all set.", "success");
+    setTimeout(showMainUI, 600);
+  } else {
+    setSetupStatus(
+      "Still not detected. If you just installed it, give it a few seconds, then click again. " +
+      "Make sure you ran the installer matching your operating system.",
+      "error"
+    );
+  }
+}
+
+// --- Sign-in gate ---
+//
+// We can't actually verify the user is signed in (the extension has no
+// `cookies` permission, and that's intentional). The banner is a one-time
+// onboarding nudge: it shows on first run, the user clicks "I'm signed in"
+// once, and we remember that confirmation in chrome.storage.local. They can
+// always reopen the link to YouTube via this banner.
+
+async function refreshSignInBanner() {
+  const confirmedAt = await storage.get(STORAGE_KEYS.signInConfirmed, null);
+  if (confirmedAt) {
+    elements.signinBanner.classList.add("hidden");
+  } else {
+    elements.signinBanner.classList.remove("hidden");
+  }
+}
+
+async function handleConfirmSignIn() {
+  await storage.set(STORAGE_KEYS.signInConfirmed, new Date().toISOString());
+  await refreshSignInBanner();
+}
 
 // --- Helpers ---
 
@@ -117,6 +313,59 @@ function validateAndNormalizeYouTubeUrl(input) {
   return { originalUrl: parsedUrl.toString(), videoId, url: normalizedUrl.toString() };
 }
 
+function detectPlatform() {
+  const ua = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+  if (ua.includes("mac")) return "mac";
+  if (ua.includes("win")) return "windows";
+  if (ua.includes("linux")) return "linux";
+  return "unknown";
+}
+
+function installInstructionFor(plat) {
+  switch (plat) {
+    case "mac":
+      return "Install the PixelCatch Helper .pkg (double-click PixelCatch-Helper-1.0.0.pkg).";
+    case "windows":
+      return "Install the PixelCatch Helper (double-click PixelCatch-Helper-Setup.exe).";
+    case "linux":
+      return "Run tools/install-linux.sh --extension-id <your-extension-id> from a terminal.";
+    default:
+      return "Install the PixelCatch Helper for your operating system — see the README.";
+  }
+}
+
+function logPathFor(plat) {
+  switch (plat) {
+    case "mac":     return "~/Library/Logs/com.pixelcatch.downloader.log";
+    case "windows": return "%LOCALAPPDATA%\\PixelCatch\\downloader.log";
+    case "linux":   return "~/.local/state/pixelcatch/downloader.log";
+    default:        return "the helper log file";
+  }
+}
+
+function friendlyNativeError(rawMessage) {
+  const msg = String(rawMessage || "");
+  const plat = detectPlatform();
+  if (/specified native messaging host not found/i.test(msg)) {
+    return `PixelCatch helper isn't installed yet. ${installInstructionFor(plat)}`;
+  }
+  if (/native host has exited/i.test(msg)) {
+    return `The PixelCatch helper crashed unexpectedly. Check ${logPathFor(plat)} for details.`;
+  }
+  if (/access to the specified native messaging host is forbidden/i.test(msg)) {
+    return "The helper rejected this extension's ID. Reinstall the helper with the current extension ID from chrome://extensions.";
+  }
+  return msg || "Unknown native messaging error.";
+}
+
+function validateFormat(value) {
+  const format = String(value || "").trim().toLowerCase();
+  if (!ALLOWED_FORMATS.has(format)) {
+    throw new Error(`Unsupported quality "${value}".`);
+  }
+  return format;
+}
+
 // --- Recent links ---
 
 function renderRecentLinks(recentLinks = []) {
@@ -139,7 +388,7 @@ function renderRecentLinks(recentLinks = []) {
     link.className = "recent-link";
     link.href = entry.url;
     link.target = "_blank";
-    link.rel = "noreferrer";
+    link.rel = "noopener noreferrer";
     link.textContent = formatRecentLinkLabel(entry);
     openedAt.textContent = ` — ${formatDate(entry.openedAt)}`;
     item.append(link, openedAt);
@@ -180,10 +429,12 @@ async function handleOpenLastVideo() {
 
 function handleYouTubeDownload() {
   let normalizedEntry;
+  let format;
   try {
     normalizedEntry = validateAndNormalizeYouTubeUrl(elements.youtubeUrlInput.value);
+    format = validateFormat(elements.qualitySelect.value);
   } catch (error) {
-    updateProgress({ label: "Invalid URL", statusMsg: error.message, isError: true });
+    updateProgress({ label: "Invalid input", statusMsg: error.message, isError: true });
     return;
   }
 
@@ -191,10 +442,16 @@ function handleYouTubeDownload() {
   updateProgress({ label: "Connecting…", statusMsg: "Starting download…" });
 
   let port;
+  let finished = false;
+
   try {
-    port = chrome.runtime.connectNative("com.extension.ytdownloader");
+    port = chrome.runtime.connectNative(NATIVE_HOST);
   } catch (error) {
-    updateProgress({ label: "Error", statusMsg: `Could not connect: ${error.message}`, isError: true });
+    updateProgress({
+      label: "Error",
+      statusMsg: friendlyNativeError(error.message),
+      isError: true,
+    });
     elements.downloadButton.disabled = false;
     return;
   }
@@ -209,6 +466,7 @@ function handleYouTubeDownload() {
         statusMsg: msg.status ?? ""
       });
     } else if (msg.type === "done") {
+      finished = true;
       updateProgress({
         percent: 100,
         label: msg.filename ?? "Complete",
@@ -216,19 +474,25 @@ function handleYouTubeDownload() {
         isDone: true
       });
       saveRecentYouTubeLink({ url: normalizedEntry.url, openedAt: new Date().toISOString() })
-        .then(refreshRecentLinks);
+        .then(refreshRecentLinks)
+        .catch((err) => console.error("Failed to save recent link", err));
       elements.downloadButton.disabled = false;
-      port.disconnect();
     } else if (msg.type === "error") {
+      finished = true;
       updateProgress({ label: "Failed", statusMsg: msg.error ?? "Download failed.", isError: true });
       elements.downloadButton.disabled = false;
-      port.disconnect();
     }
   });
 
   port.onDisconnect.addListener(() => {
-    if (chrome.runtime.lastError) {
-      updateProgress({ label: "Error", statusMsg: chrome.runtime.lastError.message, isError: true });
+    // Chrome always fires onDisconnect with lastError="Native host has exited"
+    // even on a clean successful exit — only show it if we never got a done/error message.
+    if (!finished && chrome.runtime.lastError) {
+      updateProgress({
+        label: "Error",
+        statusMsg: friendlyNativeError(chrome.runtime.lastError.message),
+        isError: true,
+      });
     }
     elements.downloadButton.disabled = false;
   });
@@ -236,7 +500,7 @@ function handleYouTubeDownload() {
   port.postMessage({
     action: "download",
     url: normalizedEntry.url,
-    format: elements.qualitySelect.value
+    format
   });
 }
 
@@ -262,6 +526,42 @@ elements.openYouTubeStudioButton.addEventListener("click", () => {
   chrome.tabs.create({ url: "https://studio.youtube.com/" });
 });
 
+elements.openYouTubeButton.addEventListener("click", () => {
+  chrome.tabs.create({ url: "https://www.youtube.com/" });
+});
+
+elements.confirmSigninButton.addEventListener("click", () => {
+  handleConfirmSignIn().catch((error) => {
+    console.error("Failed to record sign-in confirmation", error);
+  });
+});
+
+elements.setupDownloadButton.addEventListener("click", () => {
+  downloadHelperForPlatform();
+});
+
+elements.setupRecheckButton.addEventListener("click", () => {
+  recheckHelper().catch((error) => {
+    console.error("Recheck failed", error);
+    setSetupStatus("Couldn't run the check. " + (error?.message || ""), "error");
+  });
+});
+
+elements.setupHelpButton.addEventListener("click", () => {
+  chrome.tabs.create({ url: HELPER_HELP_URL });
+});
+
 // --- Init ---
 
 refreshRecentLinks().catch(console.error);
+refreshSignInBanner().catch(console.error);
+
+// Helper presence check runs on every popup open. While it's pending we
+// keep both panels hidden to avoid a flash of the wrong UI; whichever
+// resolves wins. Quietly swap to the right view when we know.
+elements.setupPanel.classList.add("hidden");
+elements.mainPanel.classList.add("hidden");
+checkHelperPresence({ silent: true }).catch((error) => {
+  console.error("Helper presence check failed", error);
+  showSetupPanel("ping-failed");
+});

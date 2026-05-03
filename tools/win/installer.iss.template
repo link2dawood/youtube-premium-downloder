@@ -1,0 +1,104 @@
+; Inno Setup script for PixelCatch Helper.
+;
+; This is a template. Substitute the placeholders before compiling:
+;
+;   __EXTENSION_IDS_JSON_LIST__   --  comma-separated list of
+;                                     "chrome-extension://ID/" entries, e.g.
+;                                     "chrome-extension://aaaa.../","chrome-extension://bbbb.../"
+;   __VERSION__                   --  helper version, e.g. "1.0.0"
+;
+; Build it on a Windows machine with Inno Setup 6 installed:
+;
+;   1. Run tools/build-win.ps1 -ExtensionId <id>  (PowerShell on Windows)
+;      That script does all the substitution + asset assembly + invokes ISCC.
+;   2. Output: dist\PixelCatch-Helper-Setup-<version>.exe
+;
+; What this installer ships in the .exe:
+;   - downloader.py
+;   - yt-dlp.exe (standalone, no Python needed for yt-dlp itself)
+;   - python-embed/                   (Windows embeddable Python distribution,
+;                                      bundled so the user doesn't have to
+;                                      install Python separately)
+;   - runner.bat                      (generated post-install)
+;   - registry NM host registration   (per-user, no admin)
+
+#define AppName "PixelCatch Helper"
+#define AppPublisher "PixelCatch"
+#define AppVersion "__VERSION__"
+#define HostName "com.pixelcatch.downloader"
+
+[Setup]
+AppId={{B7F1A8C2-4E72-4A1F-9B23-AE0C8D6F1D24}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppPublisher={#AppPublisher}
+DefaultDirName={localappdata}\PixelCatch
+DefaultGroupName={#AppName}
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+ArchitecturesInstallIn64BitMode=x64
+OutputDir=..\..\dist
+OutputBaseFilename=PixelCatch-Helper-Setup-{#AppVersion}
+Compression=lzma2/ultra
+SolidCompression=yes
+WizardStyle=modern
+DisableDirPage=yes
+UninstallDisplayName={#AppName}
+UninstallDisplayIcon={app}\python-embed\python.exe
+LicenseFile=
+SetupLogging=yes
+
+[Files]
+Source: "payload\downloader.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "payload\yt-dlp.exe";    DestDir: "{app}"; Flags: ignoreversion
+Source: "payload\python-embed\*"; DestDir: "{app}\python-embed"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "payload\manifest.json"; DestDir: "{app}"; DestName: "{#HostName}.json"; Flags: ignoreversion
+Source: "payload\runner.bat";    DestDir: "{app}"; Flags: ignoreversion
+
+[Registry]
+; Register the native messaging host with every Chromium-family browser we
+; support. Per-user keys (HKCU) — no admin needed.
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\{#HostName}";          ValueType: string; ValueData: "{app}\{#HostName}.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Chromium\NativeMessagingHosts\{#HostName}";               ValueType: string; ValueData: "{app}\{#HostName}.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\{#HostName}";         ValueType: string; ValueData: "{app}\{#HostName}.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\{#HostName}"; ValueType: string; ValueData: "{app}\{#HostName}.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Vivaldi\NativeMessagingHosts\{#HostName}";                ValueType: string; ValueData: "{app}\{#HostName}.json"; Flags: uninsdeletekey
+
+; Sweep the legacy host name from earlier dev builds, if present.
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.extension.ytdownloader";          Flags: dontcreatekey deletekey
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.extension.ytdownloader";         Flags: dontcreatekey deletekey
+Root: HKCU; Subkey: "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.extension.ytdownloader"; Flags: dontcreatekey deletekey
+
+[Run]
+; Show a clear "we're done" message and offer to open the YouTube sign-in tab.
+Filename: "https://www.youtube.com/"; Description: "Open YouTube to sign in"; Flags: postinstall shellexec skipifsilent unchecked
+
+[UninstallDelete]
+Type: files; Name: "{app}\runner.bat"
+Type: files; Name: "{app}\{#HostName}.json"
+Type: files; Name: "{app}\downloader.log"
+
+[Code]
+// After install, write runner.bat so it points at the bundled embedded Python
+// with absolute paths (Chrome launches the host with a stripped PATH).
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  RunnerPath: string;
+  RunnerBody: string;
+  PythonPath: string;
+  HelperPath: string;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    RunnerPath := ExpandConstant('{app}\runner.bat');
+    PythonPath := ExpandConstant('{app}\python-embed\python.exe');
+    HelperPath := ExpandConstant('{app}\downloader.py');
+    RunnerBody :=
+      '@echo off' + #13#10 +
+      'setlocal' + #13#10 +
+      'set "PATH=' + ExpandConstant('{app}') + ';%PATH%"' + #13#10 +
+      '"' + PythonPath + '" "' + HelperPath + '"' + #13#10;
+    SaveStringToFile(RunnerPath, RunnerBody, False);
+  end;
+end;

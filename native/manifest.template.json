@@ -1,6 +1,6 @@
 {
-  "name": "com.extension.ytdownloader",
-  "description": "Downloads YouTube member-only videos via yt-dlp using Chrome cookies",
+  "name": "com.pixelcatch.downloader",
+  "description": "PixelCatch YouTube downloader native host",
   "path": "__SCRIPT_PATH__",
   "type": "stdio",
   "allowed_origins": [

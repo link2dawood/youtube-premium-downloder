@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PixelCatch Helper</title>
+    <style>
+      body {
+        font-family: -apple-system, "Helvetica Neue", sans-serif;
+        font-size: 13px;
+        color: #1f2937;
+        line-height: 1.5;
+        margin: 18px;
+      }
+      h1 { font-size: 18px; margin: 0 0 12px; color: #1d4ed8; }
+      h2 { font-size: 14px; margin: 16px 0 6px; color: #0f172a; }
+      ul { margin: 6px 0 12px 18px; padding: 0; }
+      li { margin-bottom: 4px; }
+      code { font-family: ui-monospace, Menlo, monospace; background: #f1f5f9; padding: 1px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Install the PixelCatch Helper</h1>
+    <p>This installer sets up the small local helper that the <strong>PixelCatch</strong> Chrome extension needs in order to download YouTube Premium and members-only videos on your Mac.</p>
+
+    <h2>What gets installed</h2>
+    <ul>
+      <li>The helper script and a bundled copy of <code>yt-dlp</code> in <code>/Library/Application Support/PixelCatch/</code></li>
+      <li>A Chrome native messaging registration in <code>/Library/Google/Chrome/NativeMessagingHosts/</code></li>
+    </ul>
+
+    <h2>What it does <em>not</em> do</h2>
+    <ul>
+      <li>No remote server, no telemetry, no Google account access.</li>
+      <li>Downloads happen entirely on this Mac, using your existing signed-in YouTube session in Chrome.</li>
+    </ul>
+
+    <p>You'll need an administrator password to complete the install. After it finishes, reload PixelCatch in <code>chrome://extensions</code> and you're ready to download.</p>
+  </body>
+</html>

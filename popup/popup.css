@@ -394,3 +394,181 @@ button:disabled {
   font-size: 12px;
   color: #0f766e;
 }
+
+/* --- First-run "install the helper" setup panel --- */
+
+.setup-panel {
+  margin-top: 4px;
+  padding: 22px 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #eef2ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe;
+  text-align: center;
+}
+
+.setup-panel.hidden {
+  display: none;
+}
+
+.setup-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.setup-title {
+  margin: 4px 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0c4a6e;
+}
+
+.setup-body {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #1e3a8a;
+}
+
+.setup-primary {
+  width: 100%;
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(29, 78, 216, 0.25);
+  transition: transform 0.05s ease, box-shadow 0.15s ease;
+}
+
+.setup-primary:hover {
+  filter: brightness(1.05);
+}
+
+.setup-primary:active {
+  transform: translateY(1px);
+}
+
+.setup-platform-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.4;
+}
+
+.setup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  align-items: stretch;
+}
+
+.setup-secondary {
+  background: rgba(255, 255, 255, 0.85);
+  color: #1e3a8a;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.setup-secondary:hover {
+  background: #fff;
+}
+
+.setup-link {
+  background: transparent;
+  color: #1d4ed8;
+  border: 0;
+  padding: 4px;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.setup-status {
+  margin: 12px 0 0;
+  min-height: 16px;
+  font-size: 12px;
+  color: #0c4a6e;
+}
+
+.setup-status.error {
+  color: #b91c1c;
+}
+
+.setup-status.success {
+  color: #15803d;
+  font-weight: 600;
+}
+
+/* Hide the main download form while setup is needed. */
+#main-panel.hidden {
+  display: none;
+}
+
+/* --- Sign-in onboarding banner --- */
+
+.signin-banner {
+  margin-top: 4px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe;
+}
+
+.signin-banner.hidden {
+  display: none;
+}
+
+.signin-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0c4a6e;
+}
+
+.signin-body {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1e3a8a;
+}
+
+.signin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.signin-primary,
+.signin-secondary {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+}
+
+.signin-primary {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.signin-secondary {
+  background: #e0e7ff;
+  color: #1e3a8a;
+}
+
+.signin-primary:hover,
+.signin-secondary:hover {
+  filter: brightness(1.05);
+}
