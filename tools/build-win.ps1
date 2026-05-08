@@ -187,11 +187,15 @@ $manifestJson = $manifest | ConvertTo-Json -Depth 4
 Set-Content -Path (Join-Path $PayloadDir "runner.bat") -Value "@echo off`r`nrem placeholder; rewritten by installer post-install`r`n" -Encoding ASCII
 
 # ---------- Substitute the .iss template ----------
+# Inno Setup resolves Source: paths relative to the .iss file's directory, so
+# we write the generated .iss inside BuildDir, sitting alongside the payload\
+# folder — that way "Source: payload\foo.exe" inside the .iss correctly
+# points at $BuildDir\payload\foo.exe.
 $issTemplate = Get-Content (Join-Path $WinDir "installer.iss.template") -Raw
 $iss = $issTemplate.Replace("__VERSION__", $Version)
 # We don't need to substitute __EXTENSION_IDS_JSON_LIST__ in the .iss because
 # the IDs live inside the staged manifest.json instead.
-$issPath = Join-Path $WinDir "installer.generated.iss"
+$issPath = Join-Path $BuildDir "installer.generated.iss"
 [System.IO.File]::WriteAllText($issPath, $iss)
 
 # ---------- Compile with Inno Setup ----------
