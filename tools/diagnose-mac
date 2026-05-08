@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+#
+# One-shot diagnostic + auto-fix for "PixelCatch downloads only 720p" on macOS.
+#
+# Usage:
+#   sudo bash tools/diagnose-mac [VIDEO_URL]
+#
+# If you don't pass a URL we use a known-4K test video.
+#
+# Reports:
+#   1. Bundled yt-dlp version
+#   2. Whether the on-disk downloader.py has the latest player_client config
+#   3. What formats each player_client returns for the test video
+#   4. Updates yt-dlp to absolute latest before testing
+#   5. Updates downloader.py from the repo before testing
+#
+# Then prints a final verdict: "4K available — re-test now" or
+# "this video tops out at NNNNp on this account."
+
+set +e
+
+INSTALL_DIR="/Library/Application Support/PixelCatch"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_URL="${1:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}"   # Big Buck Bunny 4K
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Run with sudo:  sudo bash tools/diagnose-mac" >&2
+    exit 1
+fi
+
+SEP="================================================================"
+
+echo "$SEP"
+echo "PixelCatch Mac diagnostic"
+echo "$SEP"
+
+# ---------- 1. Update on-disk downloader.py from repo ----------
+echo
+echo "[1/5] Updating on-disk downloader.py from repo..."
+SRC="$REPO_ROOT/native/downloader.py"
+DEST="$INSTALL_DIR/downloader.py"
+if [ ! -f "$SRC" ]; then
+    echo "  ! repo source not found at $SRC — bail."; exit 1
+fi
+install -m 755 "$SRC" "$DEST"
+xattr -dr com.apple.quarantine "$INSTALL_DIR" 2>/dev/null || true
+if grep -q "player_client=tv" "$DEST"; then
+    echo "  ✓ player_client=tv present"
+else
+    echo "  ✗ player_client=tv MISSING — repo source is also stale, bail"
+    exit 1
+fi
+
+# ---------- 2. Update bundled yt-dlp to absolute latest ----------
+echo
+echo "[2/5] Updating bundled yt-dlp to latest release..."
+curl -fL --retry 3 -o "$INSTALL_DIR/yt-dlp" \
+    https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+    && chmod 755 "$INSTALL_DIR/yt-dlp"
+xattr -dr com.apple.quarantine "$INSTALL_DIR" 2>/dev/null || true
+
+# ---------- 3. yt-dlp version ----------
+echo
+echo "[3/5] yt-dlp version:"
+"$INSTALL_DIR/yt-dlp" --version 2>&1 | sed 's/^/  /'
+
+# ---------- 4. Dump formats for the test URL ----------
+echo
+echo "[4/5] Available formats for: $TEST_URL"
+echo "      (using player_client=tv,web,web_safari,mweb)"
+echo
+"$INSTALL_DIR/yt-dlp" \
+    --cookies-from-browser chrome \
+    --extractor-args "youtube:player_client=tv,web,web_safari,mweb" \
+    --no-playlist \
+    -F \
+    "$TEST_URL" 2>&1 | sed 's/^/  /'
+
+# ---------- 5. What would the 4K preset pick? ----------
+echo
+echo "[5/5] What the 4K preset would download (--simulate, no actual download):"
+"$INSTALL_DIR/yt-dlp" \
+    --cookies-from-browser chrome \
+    --extractor-args "youtube:player_client=tv,web,web_safari,mweb" \
+    --no-playlist \
+    -f "bv*[height<=2160]+ba/best[height<=2160]" \
+    -S "res:2160,tbr,fps,vcodec:av01,acodec:opus" \
+    --simulate \
+    --print "%(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s" \
+    "$TEST_URL" 2>&1 | sed 's/^/  /'
+
+echo
+echo "$SEP"
+echo "Done. If the [5/5] line shows 3840x2160, 4K is working — try a real"
+echo "download from the side panel and check ~/Library/Logs/com.pixelcatch.downloader.log"
+echo "If it shows lower, the test video may not have 4K, or YouTube is"
+echo "currently rejecting all our player clients. Paste the [4/5] table back"
+echo "to me and we'll work out next steps."
+echo "$SEP"

@@ -486,8 +486,10 @@ def run_download(url, download_path, ytdlp, fmt, sort_order, format_key):
         "--progress-template",
         f"{PROGRESS_PREFIX}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s",
         # Echo the actual format that won so a future "low quality" complaint
-        # is debuggable from the log without re-running.
-        "--print", "before_dl:[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s",
+        # is debuggable from the log without re-running. Use the default
+        # "video" event (fires once per video before download); `before_dl`
+        # is NOT a valid --print event prefix and gets silently dropped.
+        "--print", "[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s",
         "-o", os.path.join(download_path, "%(title)s.%(ext)s"),
     ]
 
