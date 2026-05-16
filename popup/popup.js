@@ -1,20 +1,21 @@
+// Popup — thin client of the background service worker.
+//
+// All native messaging and download state lives in the worker. We just:
+//   1. Send "start-download" / "cancel-download" / "ping-host" messages.
+//   2. Subscribe to "job-update" broadcasts and re-render the affected card.
+//   3. On open, fetch the current job list from the worker so reopening the
+//      side panel shows whatever's in flight or recently finished.
+//
+// Closing the side panel does NOT cancel downloads anymore — the worker
+// owns the ports and keeps running.
+
 import { storage } from "../src/lib/storage.js";
 
 const STORAGE_KEYS = {
   recentYouTubeLinks: "recentYouTubeLinks",
-  signInConfirmed: "signInConfirmedAt"
+  signInConfirmed: "signInConfirmedAt",
 };
 
-const NATIVE_HOST = "com.pixelcatch.downloader";
-
-// --- Helper download endpoints ---
-//
-// Points at the published helper installers for each OS. The release assets
-// must be uploaded to the "latest" GitHub release of the repo below for the
-// buttons to actually deliver something:
-//   - PixelCatch-Helper.pkg          (macOS)
-//   - PixelCatch-Helper-Setup.exe    (Windows)
-//   - install-linux.sh               (Linux)
 const HELPER_REPO = "link2dawood/youtube-premium-downloder";
 const HELPER_DOWNLOAD_BASE = `https://github.com/${HELPER_REPO}/releases/latest/download`;
 const HELPER_DOWNLOADS = {
@@ -23,11 +24,6 @@ const HELPER_DOWNLOADS = {
   linux:   `${HELPER_DOWNLOAD_BASE}/install-linux.sh`,
 };
 const HELPER_HELP_URL = `https://github.com/${HELPER_REPO}/tree/dev#install`;
-
-// How long to wait for the helper to reply to a ping before assuming it's
-// not installed. The native host launches a fresh process per port, so a
-// generous timeout covers cold-start latency on slow Macs / spinning disks.
-const PING_TIMEOUT_MS = 3000;
 
 const MAX_RECENT_YOUTUBE_LINKS = 5;
 
@@ -38,22 +34,21 @@ const YOUTUBE_HOSTS = new Set([
   "www.youtube-nocookie.com",
   "www.youtube.com",
   "youtube-nocookie.com",
-  "youtube.com"
+  "youtube.com",
 ]);
 
-const ALLOWED_FORMATS = new Set([
-  "best",
-  "4k",
-  "2k",
-  "1080p",
-  "720p",
-  "480p",
-  "audio"
-]);
+const ALLOWED_FORMATS = new Set(["best", "4k", "2k", "1080p", "720p", "480p", "audio"]);
+const FORMAT_LABELS = {
+  best: "Best available",
+  "4k": "4K (2160p)",
+  "2k": "2K (1440p)",
+  "1080p": "1080p",
+  "720p": "720p",
+  "480p": "480p",
+  audio: "Audio only",
+};
 
-const MAX_CONCURRENT_DOWNLOADS = 3;
-
-const elements = {
+const els = {
   closeButton: document.querySelector("#close-button"),
   downloadButton: document.querySelector("#download-button"),
   qualitySelect: document.querySelector("#quality-select"),
@@ -73,65 +68,73 @@ const elements = {
   setupHelpButton: document.querySelector("#setup-help-button"),
   setupPlatformNote: document.querySelector("#setup-platform-note"),
   setupStatus: document.querySelector("#setup-status"),
-  mainPanel: document.querySelector("#main-panel")
+  mainPanel: document.querySelector("#main-panel"),
 };
 
-// --- Helper presence detection ---
-//
-// We try to ping the native host on popup open. The host responds with
-// `{type: "pong"}` and exits. If the host isn't installed, Chrome fires
-// onDisconnect with a "not found" lastError. Either way we resolve quickly
-// and decide whether to show the setup panel or the regular UI.
+// --- Platform detection ---
 
-function pingNativeHost(timeoutMs = PING_TIMEOUT_MS) {
+function detectPlatform() {
+  const ua = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+  if (ua.includes("mac")) return "mac";
+  if (ua.includes("win")) return "windows";
+  if (ua.includes("linux")) return "linux";
+  return "unknown";
+}
+
+// --- URL + format validation (client-side, defense in depth) ---
+
+function extractYouTubeVideoId(url) {
+  const hostname = url.hostname.replace(/^www\./, "");
+  if (hostname === "youtu.be") return url.pathname.split("/").filter(Boolean)[0] || "";
+  if (["youtube.com", "m.youtube.com", "music.youtube.com"].includes(hostname)) {
+    if (url.pathname === "/watch") return url.searchParams.get("v") || "";
+    const [, route, value] = url.pathname.split("/");
+    if (["shorts", "embed", "live"].includes(route)) return value || "";
+  }
+  if (hostname === "youtube-nocookie.com") {
+    const [, route, value] = url.pathname.split("/");
+    if (route === "embed") return value || "";
+  }
+  return "";
+}
+
+function validateAndNormalizeYouTubeUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) throw new Error("Paste a YouTube URL first.");
+  let parsed;
+  try { parsed = new URL(raw); }
+  catch { throw new Error("Enter a valid URL that starts with http:// or https://."); }
+  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Only http/https URLs are supported.");
+  if (!YOUTUBE_HOSTS.has(parsed.hostname)) throw new Error("That isn't a supported YouTube URL.");
+  const videoId = extractYouTubeVideoId(parsed);
+  if (!videoId) throw new Error("Couldn't find a YouTube video ID in that URL.");
+  const normalized = new URL("https://www.youtube.com/watch");
+  normalized.searchParams.set("v", videoId);
+  return { url: normalized.toString(), videoId };
+}
+
+function validateFormat(value) {
+  const f = String(value || "").trim().toLowerCase();
+  if (!ALLOWED_FORMATS.has(f)) throw new Error(`Unsupported quality "${value}".`);
+  return f;
+}
+
+// --- Setup panel (helper detection) ---
+
+async function pingHost() {
   return new Promise((resolve) => {
-    let resolved = false;
-    let port;
-    const finish = (result) => {
-      if (resolved) return;
-      resolved = true;
-      try { port?.disconnect(); } catch { /* already disconnected */ }
-      resolve(result);
-    };
-
-    try {
-      port = chrome.runtime.connectNative(NATIVE_HOST);
-    } catch (error) {
-      finish({ ok: false, error: error?.message || String(error) });
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      finish({ ok: false, error: "timeout" });
-    }, timeoutMs);
-
-    port.onMessage.addListener((msg) => {
-      if (msg && msg.type === "pong") {
-        clearTimeout(timer);
-        finish({ ok: true, version: msg.version, platform: msg.platform });
-      }
+    chrome.runtime.sendMessage({ type: "ping-host" }, (response) => {
+      // Drain lastError if the worker is somehow gone.
+      void chrome.runtime.lastError;
+      resolve(response || { ok: false, error: "no-response" });
     });
-
-    port.onDisconnect.addListener(() => {
-      clearTimeout(timer);
-      const lastError = chrome.runtime.lastError?.message || "disconnected";
-      finish({ ok: false, error: lastError });
-    });
-
-    try {
-      port.postMessage({ action: "ping" });
-    } catch (error) {
-      clearTimeout(timer);
-      finish({ ok: false, error: error?.message || String(error) });
-    }
   });
 }
 
-// --- Setup panel ---
-
 function setSetupStatus(text, kind) {
-  elements.setupStatus.textContent = text || "";
-  elements.setupStatus.className = "setup-status" + (kind ? ` ${kind}` : "");
+  if (!els.setupStatus) return;
+  els.setupStatus.textContent = text || "";
+  els.setupStatus.className = "setup-status" + (kind ? ` ${kind}` : "");
 }
 
 function showSetupPanel(reason) {
@@ -148,31 +151,22 @@ function showSetupPanel(reason) {
     linux:   "Run the script with your extension ID — see the help link below.",
     unknown: "See the help link below for your operating system.",
   };
-  elements.setupDownloadButton.textContent = labels[plat] || labels.unknown;
-  elements.setupPlatformNote.textContent = notes[plat] || notes.unknown;
-
-  // Hide the regular download UI while setup is required.
-  elements.setupPanel.classList.remove("hidden");
-  elements.mainPanel.classList.add("hidden");
-  if (reason === "ping-failed") {
-    setSetupStatus("Helper not detected on this computer.", "");
-  } else {
-    setSetupStatus("");
-  }
+  els.setupDownloadButton.textContent = labels[plat] || labels.unknown;
+  els.setupPlatformNote.textContent = notes[plat] || notes.unknown;
+  els.setupPanel.classList.remove("hidden");
+  els.mainPanel.classList.add("hidden");
+  setSetupStatus(reason === "ping-failed" ? "Helper not detected on this computer." : "");
 }
 
 function showMainUI() {
-  elements.setupPanel.classList.add("hidden");
-  elements.mainPanel.classList.remove("hidden");
+  els.setupPanel.classList.add("hidden");
+  els.mainPanel.classList.remove("hidden");
 }
 
 async function checkHelperPresence({ silent = false } = {}) {
   if (!silent) setSetupStatus("Checking…");
-  const result = await pingNativeHost();
-  if (result.ok) {
-    showMainUI();
-    return result;
-  }
+  const result = await pingHost();
+  if (result.ok) { showMainUI(); return result; }
   showSetupPanel("ping-failed");
   return result;
 }
@@ -182,7 +176,7 @@ function downloadHelperForPlatform() {
   const url = HELPER_DOWNLOADS[plat] || HELPER_HELP_URL;
   if (!HELPER_REPO || HELPER_REPO.includes("REPO_OWNER")) {
     setSetupStatus(
-      "Download URL hasn't been configured yet — open popup.js and set HELPER_REPO to your GitHub <owner>/<repo> before shipping.",
+      "Download URL hasn't been configured yet — open popup.js and set HELPER_REPO before shipping.",
       "error"
     );
     return;
@@ -193,9 +187,9 @@ function downloadHelperForPlatform() {
 
 async function recheckHelper() {
   setSetupStatus("Checking…");
-  const result = await pingNativeHost();
+  const result = await pingHost();
   if (result.ok) {
-    setSetupStatus("Helper detected — version " + (result.version || "?") + ". You're all set.", "success");
+    setSetupStatus(`Helper detected — version ${result.version || "?"}. You're all set.`, "success");
     setTimeout(showMainUI, 600);
   } else {
     setSetupStatus(
@@ -206,21 +200,11 @@ async function recheckHelper() {
   }
 }
 
-// --- Sign-in gate ---
-//
-// We can't actually verify the user is signed in (the extension has no
-// `cookies` permission, and that's intentional). The banner is a one-time
-// onboarding nudge: it shows on first run, the user clicks "I'm signed in"
-// once, and we remember that confirmation in chrome.storage.local. They can
-// always reopen the link to YouTube via this banner.
+// --- Sign-in banner ---
 
 async function refreshSignInBanner() {
   const confirmedAt = await storage.get(STORAGE_KEYS.signInConfirmed, null);
-  if (confirmedAt) {
-    elements.signinBanner.classList.add("hidden");
-  } else {
-    elements.signinBanner.classList.remove("hidden");
-  }
+  els.signinBanner.classList.toggle("hidden", Boolean(confirmedAt));
 }
 
 async function handleConfirmSignIn() {
@@ -228,53 +212,85 @@ async function handleConfirmSignIn() {
   await refreshSignInBanner();
 }
 
-// --- Helpers ---
+// --- Recent links ---
 
 function formatDate(value) {
   if (!value) return "Never";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-// --- Multi-download state ---
-//
-// Each in-flight download is a card in #active-downloads. We track them in a
-// Map keyed by an internal job id so we can update / cancel individual jobs.
-// Closing the popup window destroys all `port` references, which disconnects
-// the native messaging ports and terminates the corresponding yt-dlp procs —
-// document this clearly in the README so users know to keep the popup open.
+function formatRecentLinkLabel(entry) {
+  if (!entry?.url) return "Never";
+  try {
+    const url = new URL(entry.url);
+    return url.pathname === "/watch" ? (url.searchParams.get("v") || entry.url) : `${url.hostname}${url.pathname}`;
+  } catch { return entry.url; }
+}
 
-let nextJobId = 1;
-const activeJobs = new Map();   // id -> { port, card, els, finished, url }
-
-function activeDownloadCount() {
-  let n = 0;
-  for (const job of activeJobs.values()) {
-    if (!job.finished) n++;
+function renderRecentLinks(recentLinks = []) {
+  els.recentLinksList.replaceChildren();
+  if (!recentLinks.length) {
+    const li = document.createElement("li");
+    li.className = "empty-state";
+    li.textContent = "No videos downloaded yet.";
+    els.recentLinksList.append(li);
+    els.openLastVideoButton.disabled = true;
+    els.lastVideo.textContent = "Never";
+    return;
   }
-  return n;
+  for (const entry of recentLinks) {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.className = "recent-link";
+    a.href = entry.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    a.textContent = formatRecentLinkLabel(entry);
+    const when = document.createElement("span");
+    when.textContent = ` — ${formatDate(entry.openedAt)}`;
+    li.append(a, when);
+    els.recentLinksList.append(li);
+  }
+  els.openLastVideoButton.disabled = false;
+  els.lastVideo.textContent = formatRecentLinkLabel(recentLinks[0]);
 }
 
-function createDownloadCard(initialLabel) {
+async function saveRecentYouTubeLink(entry) {
+  const recent = await storage.get(STORAGE_KEYS.recentYouTubeLinks, []);
+  const deduped = recent.filter((it) => it.url !== entry.url);
+  await storage.set(STORAGE_KEYS.recentYouTubeLinks, [entry, ...deduped].slice(0, MAX_RECENT_YOUTUBE_LINKS));
+}
+
+async function refreshRecentLinks() {
+  renderRecentLinks(await storage.get(STORAGE_KEYS.recentYouTubeLinks, []));
+}
+
+async function handleYouTubeOpen(event) {
+  event.preventDefault();
+  const entry = validateAndNormalizeYouTubeUrl(els.youtubeUrlInput.value);
+  await chrome.tabs.create({ url: entry.url });
+}
+
+async function handleOpenLastVideo() {
+  const recent = await storage.get(STORAGE_KEYS.recentYouTubeLinks, []);
+  const [last] = recent;
+  if (!last?.url) throw new Error("No saved video yet.");
+  await chrome.tabs.create({ url: last.url });
+}
+
+// --- Download cards (driven by worker broadcasts) ---
+
+const cards = new Map();   // jobId -> { card, els: { ... } }
+
+function makeCard(job) {
   const card = document.createElement("div");
   card.className = "download-card";
-
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "download-card-cancel";
-  cancelBtn.title = "Cancel";
-  cancelBtn.textContent = "×";
+  card.dataset.jobId = job.id;
 
   const header = document.createElement("div");
   header.className = "download-panel-header";
   const filename = document.createElement("span");
   filename.className = "download-filename";
-  filename.textContent = initialLabel || "Connecting…";
   const percent = document.createElement("span");
   percent.className = "download-percent";
-  percent.textContent = "0%";
   header.append(filename, percent);
 
   const track = document.createElement("div");
@@ -289,393 +305,247 @@ function createDownloadCard(initialLabel) {
   const eta = document.createElement("span");
   meta.append(speed, eta);
 
-  const status = document.createElement("p");
-  status.className = "download-status-msg";
+  const errorBox = document.createElement("div");
+  errorBox.className = "download-error hidden";
+  const errorIcon = document.createElement("span");
+  errorIcon.className = "download-error-icon";
+  errorIcon.textContent = "⚠";
+  const errorText = document.createElement("div");
+  errorText.className = "download-error-text";
+  errorBox.append(errorIcon, errorText);
 
-  card.append(cancelBtn, header, track, meta, status);
-  elements.activeDownloads.prepend(card);
+  const actions = document.createElement("div");
+  actions.className = "download-actions";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "download-action download-action-cancel";
+  cancelBtn.textContent = "Cancel";
+
+  const openBtn = document.createElement("button");
+  openBtn.type = "button";
+  openBtn.className = "download-action download-action-open hidden";
+  openBtn.textContent = "Open file";
+
+  const revealBtn = document.createElement("button");
+  revealBtn.type = "button";
+  revealBtn.className = "download-action download-action-reveal hidden";
+  revealBtn.textContent = "Show in folder";
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.type = "button";
+  dismissBtn.className = "download-action download-action-dismiss hidden";
+  dismissBtn.textContent = "Dismiss";
+
+  actions.append(cancelBtn, openBtn, revealBtn, dismissBtn);
+
+  card.append(header, track, meta, errorBox, actions);
+  els.activeDownloads.prepend(card);
+
+  cancelBtn.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "cancel-download", jobId: job.id }, () => {
+      void chrome.runtime.lastError;
+    });
+  });
+  openBtn.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "open-file", jobId: job.id }, () => {
+      void chrome.runtime.lastError;
+    });
+  });
+  revealBtn.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "reveal-file", jobId: job.id }, () => {
+      void chrome.runtime.lastError;
+    });
+  });
+  dismissBtn.addEventListener("click", () => {
+    card.remove();
+    cards.delete(job.id);
+    chrome.runtime.sendMessage({ type: "clear-finished" }, () => { void chrome.runtime.lastError; });
+  });
 
   return {
     card,
-    els: { cancelBtn, filename, percent, fill, speed, eta, status },
+    els: { filename, percent, fill, speed, eta, errorBox, errorText, cancelBtn, openBtn, revealBtn, dismissBtn },
   };
 }
 
-function applyProgress(els, { percent = 0, speed = "", eta = "", label, statusMsg = "", isError = false, isDone = false } = {}) {
-  if (label !== undefined) els.filename.textContent = label;
-  els.percent.textContent = `${Math.round(percent)}%`;
-  els.fill.style.width = `${percent}%`;
-  els.fill.classList.toggle("complete", isDone);
-  els.speed.textContent = speed;
-  els.eta.textContent = eta ? `ETA ${eta}` : "";
-  els.status.textContent = statusMsg;
-  els.status.className = `download-status-msg${isError ? " error" : ""}`;
-}
-
-function finalizeJob(jobId, kind /* "done" | "error" | "canceled" */) {
-  const job = activeJobs.get(jobId);
-  if (!job) return;
-  job.finished = true;
-  if (job.card) {
-    job.card.classList.toggle("done", kind === "done");
-    job.card.classList.toggle("error", kind === "error" || kind === "canceled");
+function renderJob(job) {
+  let entry = cards.get(job.id);
+  if (!entry) {
+    entry = makeCard(job);
+    cards.set(job.id, entry);
   }
-  // Remove the cancel button — the job is no longer cancelable.
-  job.els?.cancelBtn?.remove();
-  // Auto-dismiss completed cards after a moment so the list doesn't grow
-  // forever, but keep error / canceled cards around so the user can read why.
-  if (kind === "done") {
-    setTimeout(() => {
-      job.card?.remove();
-      activeJobs.delete(jobId);
-    }, 4000);
-  }
-}
+  const c = entry.els;
+  const card = entry.card;
 
-function formatRecentLinkLabel(entry) {
-  if (!entry?.url) return "Never";
-  try {
-    const url = new URL(entry.url);
-    return url.pathname === "/watch"
-      ? url.searchParams.get("v") || entry.url
-      : `${url.hostname}${url.pathname}`;
-  } catch {
-    return entry.url;
-  }
-}
+  c.filename.textContent = job.filename || `${FORMAT_LABELS[job.format] || job.format} — ${job.url.replace(/^https?:\/\//, "")}`;
+  c.percent.textContent = `${Math.round(job.percent || 0)}%`;
+  c.fill.style.width = `${Math.max(0, Math.min(100, job.percent || 0))}%`;
+  c.speed.textContent = job.speed || "";
+  c.eta.textContent = job.eta ? `ETA ${job.eta}` : "";
 
-function extractYouTubeVideoId(url) {
-  const hostname = url.hostname.replace(/^www\./, "");
+  card.classList.remove("error", "done", "canceled", "running");
+  c.errorBox.classList.add("hidden");
+  c.errorText.textContent = "";
 
-  if (hostname === "youtu.be") {
-    return url.pathname.split("/").filter(Boolean)[0] || "";
-  }
+  c.cancelBtn.classList.add("hidden");
+  c.openBtn.classList.add("hidden");
+  c.revealBtn.classList.add("hidden");
+  c.dismissBtn.classList.add("hidden");
+  c.fill.classList.remove("complete");
 
-  if (["youtube.com", "m.youtube.com", "music.youtube.com"].includes(hostname)) {
-    if (url.pathname === "/watch") return url.searchParams.get("v") || "";
-    const [, route, value] = url.pathname.split("/");
-    if (["shorts", "embed", "live"].includes(route)) return value || "";
-  }
-
-  if (hostname === "youtube-nocookie.com") {
-    const [, route, value] = url.pathname.split("/");
-    if (route === "embed") return value || "";
-  }
-
-  return "";
-}
-
-function validateAndNormalizeYouTubeUrl(input) {
-  const rawValue = String(input || "").trim();
-  if (!rawValue) throw new Error("Paste a YouTube URL first.");
-
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(rawValue);
-  } catch {
-    throw new Error("Enter a valid URL that starts with http:// or https://.");
-  }
-
-  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-    throw new Error("Only http:// and https:// YouTube URLs are supported.");
-  }
-
-  if (!YOUTUBE_HOSTS.has(parsedUrl.hostname)) {
-    throw new Error("That is not a supported YouTube URL.");
-  }
-
-  const videoId = extractYouTubeVideoId(parsedUrl);
-  if (!videoId) throw new Error("Could not find a YouTube video ID in that URL.");
-
-  const normalizedUrl = new URL("https://www.youtube.com/watch");
-  normalizedUrl.searchParams.set("v", videoId);
-
-  return { originalUrl: parsedUrl.toString(), videoId, url: normalizedUrl.toString() };
-}
-
-function detectPlatform() {
-  const ua = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
-  if (ua.includes("mac")) return "mac";
-  if (ua.includes("win")) return "windows";
-  if (ua.includes("linux")) return "linux";
-  return "unknown";
-}
-
-function installInstructionFor(plat) {
-  switch (plat) {
-    case "mac":
-      return "Install the PixelCatch Helper .pkg (double-click PixelCatch-Helper-1.0.0.pkg).";
-    case "windows":
-      return "Install the PixelCatch Helper (double-click PixelCatch-Helper-Setup.exe).";
-    case "linux":
-      return "Run tools/install-linux.sh --extension-id <your-extension-id> from a terminal.";
-    default:
-      return "Install the PixelCatch Helper for your operating system — see the README.";
+  if (job.state === "running" || job.state === "starting") {
+    card.classList.add("running");
+    c.cancelBtn.classList.remove("hidden");
+  } else if (job.state === "done") {
+    card.classList.add("done");
+    c.fill.classList.add("complete");
+    c.fill.style.width = "100%";
+    c.percent.textContent = "100%";
+    if (job.savedPath) {
+      c.openBtn.classList.remove("hidden");
+      c.revealBtn.classList.remove("hidden");
+    }
+    c.dismissBtn.classList.remove("hidden");
+  } else if (job.state === "error" || job.state === "canceled") {
+    card.classList.add(job.state === "error" ? "error" : "canceled");
+    c.errorBox.classList.remove("hidden");
+    c.errorText.textContent = job.error || "Failed.";
+    c.dismissBtn.classList.remove("hidden");
   }
 }
 
-function logPathFor(plat) {
-  switch (plat) {
-    case "mac":     return "~/Library/Logs/com.pixelcatch.downloader.log";
-    case "windows": return "%LOCALAPPDATA%\\PixelCatch\\downloader.log";
-    case "linux":   return "~/.local/state/pixelcatch/downloader.log";
-    default:        return "the helper log file";
+function removeJobCard(jobId) {
+  const entry = cards.get(jobId);
+  if (!entry) return;
+  entry.card.remove();
+  cards.delete(jobId);
+}
+
+// --- Hydrate jobs from the worker on popup open ---
+
+async function hydrateJobsFromWorker() {
+  const response = await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "list-jobs" }, (r) => {
+      void chrome.runtime.lastError;
+      resolve(r || { ok: false, jobs: [] });
+    });
+  });
+  if (!response.ok) return;
+  // Wipe any stale DOM, render in chronological order (newest first).
+  els.activeDownloads.replaceChildren();
+  cards.clear();
+  const list = (response.jobs || []).slice().reverse();
+  for (const job of list) renderJob(job);
+}
+
+// --- Live broadcasts from the worker ---
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (!msg || msg.type !== "job-update" || !msg.job) return;
+  renderJob(msg.job);
+  // Save to recent links on completion.
+  if (msg.job.state === "done") {
+    saveRecentYouTubeLink({ url: msg.job.url, openedAt: new Date().toISOString() })
+      .then(refreshRecentLinks)
+      .catch((err) => console.error("Failed to save recent link", err));
   }
-}
+});
 
-function friendlyNativeError(rawMessage) {
-  const msg = String(rawMessage || "");
-  const plat = detectPlatform();
-  if (/specified native messaging host not found/i.test(msg)) {
-    return `PixelCatch helper isn't installed yet. ${installInstructionFor(plat)}`;
-  }
-  if (/native host has exited/i.test(msg)) {
-    return `The PixelCatch helper crashed unexpectedly. Check ${logPathFor(plat)} for details.`;
-  }
-  if (/access to the specified native messaging host is forbidden/i.test(msg)) {
-    return "The helper rejected this extension's ID. Reinstall the helper with the current extension ID from chrome://extensions.";
-  }
-  return msg || "Unknown native messaging error.";
-}
-
-function validateFormat(value) {
-  const format = String(value || "").trim().toLowerCase();
-  if (!ALLOWED_FORMATS.has(format)) {
-    throw new Error(`Unsupported quality "${value}".`);
-  }
-  return format;
-}
-
-// --- Recent links ---
-
-function renderRecentLinks(recentLinks = []) {
-  elements.recentLinksList.replaceChildren();
-
-  if (!recentLinks.length) {
-    const item = document.createElement("li");
-    item.className = "empty-state";
-    item.textContent = "No videos downloaded yet.";
-    elements.recentLinksList.append(item);
-    elements.openLastVideoButton.disabled = true;
-    elements.lastVideo.textContent = "Never";
-    return;
-  }
-
-  for (const entry of recentLinks) {
-    const item = document.createElement("li");
-    const link = document.createElement("a");
-    const openedAt = document.createElement("span");
-    link.className = "recent-link";
-    link.href = entry.url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = formatRecentLinkLabel(entry);
-    openedAt.textContent = ` — ${formatDate(entry.openedAt)}`;
-    item.append(link, openedAt);
-    elements.recentLinksList.append(item);
-  }
-
-  elements.openLastVideoButton.disabled = false;
-  elements.lastVideo.textContent = formatRecentLinkLabel(recentLinks[0]);
-}
-
-async function saveRecentYouTubeLink(entry) {
-  const recentLinks = await storage.get(STORAGE_KEYS.recentYouTubeLinks, []);
-  const deduped = recentLinks.filter((item) => item.url !== entry.url);
-  await storage.set(STORAGE_KEYS.recentYouTubeLinks, [entry, ...deduped].slice(0, MAX_RECENT_YOUTUBE_LINKS));
-}
-
-async function refreshRecentLinks() {
-  const recentLinks = await storage.get(STORAGE_KEYS.recentYouTubeLinks, []);
-  renderRecentLinks(recentLinks);
-}
-
-// --- YouTube open ---
-
-async function handleYouTubeOpen(event) {
-  event.preventDefault();
-  const entry = validateAndNormalizeYouTubeUrl(elements.youtubeUrlInput.value);
-  await chrome.tabs.create({ url: entry.url });
-}
-
-async function handleOpenLastVideo() {
-  const recentLinks = await storage.get(STORAGE_KEYS.recentYouTubeLinks, []);
-  const [lastLink] = recentLinks;
-  if (!lastLink?.url) throw new Error("No saved video yet.");
-  await chrome.tabs.create({ url: lastLink.url });
-}
-
-// --- Download ---
+// --- Start a download (worker does the actual work) ---
 
 function handleYouTubeDownload() {
-  let normalizedEntry;
-  let format;
+  let normalized, format;
   try {
-    normalizedEntry = validateAndNormalizeYouTubeUrl(elements.youtubeUrlInput.value);
-    format = validateFormat(elements.qualitySelect.value);
+    normalized = validateAndNormalizeYouTubeUrl(els.youtubeUrlInput.value);
+    format = validateFormat(els.qualitySelect.value);
   } catch (error) {
-    // Surface validation failures as a one-shot error card.
-    const { card, els } = createDownloadCard("Invalid input");
-    applyProgress(els, { label: "Invalid input", statusMsg: error.message, isError: true });
-    card.classList.add("error");
-    els.cancelBtn.remove();
+    // One-shot inline error card for invalid input.
+    const fakeJob = {
+      id: `inline-${Date.now()}`,
+      url: els.youtubeUrlInput.value || "(no URL)",
+      format: els.qualitySelect.value || "best",
+      formatLabel: FORMAT_LABELS[els.qualitySelect.value] || els.qualitySelect.value,
+      state: "error",
+      percent: 0,
+      error: error.message,
+      filename: "Invalid input",
+    };
+    renderJob(fakeJob);
     return;
   }
 
-  if (activeDownloadCount() >= MAX_CONCURRENT_DOWNLOADS) {
-    const { card, els } = createDownloadCard("Queue full");
-    applyProgress(els, {
-      label: "Queue full",
-      statusMsg: `Already downloading ${MAX_CONCURRENT_DOWNLOADS} videos. Wait for one to finish, then try again.`,
-      isError: true,
-    });
-    card.classList.add("error");
-    els.cancelBtn.remove();
-    setTimeout(() => card.remove(), 4000);
-    return;
-  }
-
-  const jobId = nextJobId++;
-  const { card, els } = createDownloadCard("Connecting…");
-  applyProgress(els, { label: "Connecting…", statusMsg: "Starting download…" });
-
-  let port;
-  try {
-    port = chrome.runtime.connectNative(NATIVE_HOST);
-  } catch (error) {
-    applyProgress(els, {
-      label: "Error",
-      statusMsg: friendlyNativeError(error.message),
-      isError: true,
-    });
-    finalizeJob(jobId, "error");
-    activeJobs.set(jobId, { port: null, card, els, finished: true, url: normalizedEntry.url });
-    return;
-  }
-
-  const job = { port, card, els, finished: false, url: normalizedEntry.url };
-  activeJobs.set(jobId, job);
-
-  els.cancelBtn.addEventListener("click", () => {
-    if (job.finished) return;
-    try { port.disconnect(); } catch { /* already disconnected */ }
-    applyProgress(els, { label: "Canceled", statusMsg: "You canceled this download.", isError: true });
-    finalizeJob(jobId, "canceled");
-  });
-
-  port.onMessage.addListener((msg) => {
-    if (msg.type === "progress") {
-      applyProgress(els, {
-        percent: msg.percent ?? 0,
-        speed: msg.speed ?? "",
-        eta: msg.eta ?? "",
-        label: msg.filename ?? "Downloading…",
-        statusMsg: msg.status ?? "",
-      });
-    } else if (msg.type === "done") {
-      applyProgress(els, {
-        percent: 100,
-        label: msg.filename ?? "Complete",
-        statusMsg: msg.message ?? "Download complete.",
-        isDone: true,
-      });
-      saveRecentYouTubeLink({ url: normalizedEntry.url, openedAt: new Date().toISOString() })
-        .then(refreshRecentLinks)
-        .catch((err) => console.error("Failed to save recent link", err));
-      finalizeJob(jobId, "done");
-    } else if (msg.type === "error") {
-      applyProgress(els, { label: "Failed", statusMsg: msg.error ?? "Download failed.", isError: true });
-      finalizeJob(jobId, "error");
+  chrome.runtime.sendMessage(
+    {
+      type: "start-download",
+      url: normalized.url,
+      format,
+      formatLabel: FORMAT_LABELS[format] || format,
+    },
+    (response) => {
+      void chrome.runtime.lastError;
+      if (!response?.ok) {
+        const fakeJob = {
+          id: `inline-${Date.now()}`,
+          url: normalized.url,
+          format,
+          formatLabel: FORMAT_LABELS[format] || format,
+          state: "error",
+          percent: 0,
+          error: response?.error || "Couldn't reach the helper.",
+          filename: "Failed to start",
+        };
+        renderJob(fakeJob);
+        return;
+      }
+      if (response.job) renderJob(response.job);
     }
-  });
+  );
 
-  port.onDisconnect.addListener(() => {
-    if (job.finished) return;
-    // Native host went away before sending done/error — surface the underlying
-    // chrome.runtime.lastError if we have one, otherwise leave the card in
-    // its last-known state.
-    const lastError = chrome.runtime.lastError?.message;
-    if (lastError) {
-      applyProgress(els, {
-        label: "Error",
-        statusMsg: friendlyNativeError(lastError),
-        isError: true,
-      });
-    }
-    finalizeJob(jobId, "error");
-  });
-
-  port.postMessage({
-    action: "download",
-    url: normalizedEntry.url,
-    format,
-  });
-
-  // Clear the URL field so the user can immediately queue another download.
-  elements.youtubeUrlInput.value = "";
-  elements.youtubeUrlInput.focus();
+  els.youtubeUrlInput.value = "";
+  els.youtubeUrlInput.focus();
 }
 
 // --- Event listeners ---
 
-// In the side-panel context the close button is hidden by CSS; the user
-// closes via Chrome's own toolbar toggle. The listener stays harmless here
-// in case an older popup.html (with the button visible) ever loads.
-elements.closeButton?.addEventListener("click", () => window.close());
+els.closeButton?.addEventListener("click", () => window.close());
 
-elements.youtubeForm.addEventListener("submit", (event) => {
-  handleYouTubeOpen(event).catch((error) => {
-    console.error("Failed to open YouTube URL", error);
-  });
+els.youtubeForm.addEventListener("submit", (event) => {
+  handleYouTubeOpen(event).catch((error) => console.error("Failed to open URL", error));
 });
 
-elements.downloadButton.addEventListener("click", () => handleYouTubeDownload());
+els.downloadButton.addEventListener("click", () => handleYouTubeDownload());
 
-elements.openLastVideoButton.addEventListener("click", () => {
-  handleOpenLastVideo().catch((error) => {
-    console.error("Failed to open last video", error);
-  });
+els.openLastVideoButton.addEventListener("click", () => {
+  handleOpenLastVideo().catch((error) => console.error("Failed to open last video", error));
 });
 
-elements.openYouTubeStudioButton.addEventListener("click", () => {
+els.openYouTubeStudioButton.addEventListener("click", () => {
   chrome.tabs.create({ url: "https://studio.youtube.com/" });
 });
 
-elements.openYouTubeButton.addEventListener("click", () => {
+els.openYouTubeButton.addEventListener("click", () => {
   chrome.tabs.create({ url: "https://www.youtube.com/" });
 });
 
-elements.confirmSigninButton.addEventListener("click", () => {
-  handleConfirmSignIn().catch((error) => {
-    console.error("Failed to record sign-in confirmation", error);
-  });
+els.confirmSigninButton.addEventListener("click", () => {
+  handleConfirmSignIn().catch((error) => console.error("Failed to record sign-in confirmation", error));
 });
 
-elements.setupDownloadButton.addEventListener("click", () => {
-  downloadHelperForPlatform();
+els.setupDownloadButton.addEventListener("click", downloadHelperForPlatform);
+els.setupRecheckButton.addEventListener("click", () => {
+  recheckHelper().catch((err) => setSetupStatus("Couldn't run the check. " + (err?.message || ""), "error"));
 });
-
-elements.setupRecheckButton.addEventListener("click", () => {
-  recheckHelper().catch((error) => {
-    console.error("Recheck failed", error);
-    setSetupStatus("Couldn't run the check. " + (error?.message || ""), "error");
-  });
-});
-
-elements.setupHelpButton.addEventListener("click", () => {
-  chrome.tabs.create({ url: HELPER_HELP_URL });
-});
+els.setupHelpButton.addEventListener("click", () => chrome.tabs.create({ url: HELPER_HELP_URL }));
 
 // --- Init ---
 
 refreshRecentLinks().catch(console.error);
 refreshSignInBanner().catch(console.error);
+hydrateJobsFromWorker().catch(console.error);
 
-// Helper presence check runs on every popup open. While it's pending we
-// keep both panels hidden to avoid a flash of the wrong UI; whichever
-// resolves wins. Quietly swap to the right view when we know.
-elements.setupPanel.classList.add("hidden");
-elements.mainPanel.classList.add("hidden");
+els.setupPanel.classList.add("hidden");
+els.mainPanel.classList.add("hidden");
 checkHelperPresence({ silent: true }).catch((error) => {
   console.error("Helper presence check failed", error);
   showSetupPanel("ping-failed");

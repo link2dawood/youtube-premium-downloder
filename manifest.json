@@ -29,6 +29,7 @@
   "permissions": [
     "nativeMessaging",
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "notifications"
   ]
 }

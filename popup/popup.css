@@ -223,7 +223,7 @@ h2 {
 .active-downloads {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   margin-top: 12px;
 }
 
@@ -232,48 +232,110 @@ h2 {
 }
 
 .download-card {
-  padding: 12px;
+  position: relative;
+  padding: 14px;
   border-radius: 12px;
   background: #f0f9ff;
   border: 1px solid #bae6fd;
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 .download-card.error {
   background: #fef2f2;
-  border-color: #fecaca;
+  border-color: #fca5a5;
+  border-width: 1.5px;
 }
 
 .download-card.done {
   background: #f0fdf4;
-  border-color: #bbf7d0;
+  border-color: #86efac;
 }
 
-.download-card-cancel {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border-radius: 50%;
-  border: 0;
-  background: transparent;
+.download-card.canceled {
+  background: #f8fafc;
+  border-color: #cbd5e1;
   color: #64748b;
+}
+
+.download-error {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #f87171;
+  color: #991b1b;
+}
+
+.download-error.hidden {
+  display: none;
+}
+
+.download-error-icon {
+  flex-shrink: 0;
   font-size: 18px;
   line-height: 1;
+  color: #dc2626;
+  margin-top: 1px;
+}
+
+.download-error-text {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.download-action {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.download-card-cancel:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #0f172a;
+.download-action:hover {
+  background: #f1f5f9;
 }
 
-.download-card {
-  position: relative;
-  padding-right: 32px;
+.download-action.hidden {
+  display: none;
+}
+
+.download-action-cancel {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.download-action-cancel:hover {
+  background: #fecaca;
+}
+
+.download-action-open,
+.download-action-reveal {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.download-action-open:hover,
+.download-action-reveal:hover {
+  filter: brightness(1.07);
 }
 
 .download-panel-header {
