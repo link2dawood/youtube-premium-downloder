@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#
+# Bypass the popup and run a real download with the exact same yt-dlp
+# invocation the helper uses. Prints everything along the way so we can see
+# what file lands, what resolution it actually is, and any merge errors.
+#
+# Usage:
+#   bash tools/test-download                                   # Big Buck Bunny 4K
+#   bash tools/test-download "<URL>"                           # any video
+#   bash tools/test-download "<URL>" 1080p                     # specific preset
+#
+# Presets: best 4k 2k 1080p 720p 480p audio
+
+set +e
+
+INSTALL_DIR="/Library/Application Support/PixelCatch"
+URL="${1:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}"
+PRESET="${2:-4k}"
+
+case "$PRESET" in
+    best)  FMT="bv*+ba/best";                                       SORT="res,tbr,fps,vcodec:av01,acodec:opus" ;;
+    4k)    FMT="bv*[height<=2160]+ba/best[height<=2160]";           SORT="res:2160,tbr,fps,vcodec:av01,acodec:opus" ;;
+    2k)    FMT="bv*[height<=1440]+ba/best[height<=1440]";           SORT="res:1440,tbr,fps,vcodec:av01,acodec:opus" ;;
+    1080p) FMT="bv*[height<=1080]+ba/best[height<=1080]";           SORT="res:1080,tbr,fps,vcodec:vp09,acodec:opus" ;;
+    720p)  FMT="bv*[height<=720]+ba/best[height<=720]";             SORT="res:720,tbr,fps" ;;
+    480p)  FMT="bv*[height<=480]+ba/best[height<=480]";             SORT="res:480,tbr,fps" ;;
+    audio) FMT="ba[ext=m4a]/ba/best";                               SORT="abr,acodec:opus" ;;
+    *) echo "Unknown preset: $PRESET" >&2; exit 1 ;;
+esac
+
+DOWNLOADS="$HOME/Downloads"
+MARK="$(date +%s)"
+echo "================================================================"
+echo "PixelCatch test download"
+echo "  URL:       $URL"
+echo "  Preset:    $PRESET"
+echo "  -f:        $FMT"
+echo "  -S:        $SORT"
+echo "  Save to:   $DOWNLOADS"
+echo "  Time mark: $MARK"
+echo "================================================================"
+echo
+
+"$INSTALL_DIR/yt-dlp" \
+    --cookies-from-browser chrome \
+    --extractor-args "youtube:player_client=tv,web,web_safari,mweb" \
+    --no-playlist \
+    -f "$FMT" \
+    -S "$SORT" \
+    --merge-output-format mp4/mkv \
+    --newline \
+    --print "[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s" \
+    -o "$DOWNLOADS/%(title)s.%(ext)s" \
+    "$URL"
+EXIT_CODE=$?
+
+echo
+echo "================================================================"
+echo "yt-dlp exit code: $EXIT_CODE"
+echo
+echo "=== Files in ~/Downloads modified in the last ~minute ==="
+find "$DOWNLOADS" -maxdepth 1 -type f -newermt "@$((MARK - 5))" -print0 \
+    | xargs -0 -I{} ls -lh "{}" 2>/dev/null
+
+echo
+echo "=== ffprobe says (so you can verify actual resolution): ==="
+LAST_FILE=$(find "$DOWNLOADS" -maxdepth 1 -type f -newermt "@$((MARK - 5))" \
+    \( -name "*.mp4" -o -name "*.mkv" -o -name "*.webm" -o -name "*.m4a" \) \
+    | head -1)
+if [ -n "$LAST_FILE" ] && [ -x "$INSTALL_DIR/ffprobe" ]; then
+    "$INSTALL_DIR/ffprobe" -v error -select_streams v:0 \
+        -show_entries stream=width,height,codec_name,bit_rate \
+        -of default=noprint_wrappers=1 "$LAST_FILE" 2>&1
+    echo
+    echo "File:  $LAST_FILE"
+    echo "Size:  $(du -h "$LAST_FILE" | cut -f1)"
+else
+    echo "No video file found in ~/Downloads from this run."
+    echo "(If yt-dlp exited non-zero above, see the error message for why.)"
+fi
+echo "================================================================"
