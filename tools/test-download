@@ -29,7 +29,11 @@ case "$PRESET" in
 esac
 
 DOWNLOADS="$HOME/Downloads"
-MARK="$(date +%s)"
+# BSD find on macOS doesn't support GNU's `-newermt "@<epoch>"` syntax.
+# Instead, drop a reference file before the download and use `-newer` against
+# it afterward — works on both BSD and GNU find.
+MARK_FILE=$(mktemp -t pc-test-mark)
+trap 'rm -f "$MARK_FILE"' EXIT
 echo "================================================================"
 echo "PixelCatch test download"
 echo "  URL:       $URL"
@@ -37,7 +41,6 @@ echo "  Preset:    $PRESET"
 echo "  -f:        $FMT"
 echo "  -S:        $SORT"
 echo "  Save to:   $DOWNLOADS"
-echo "  Time mark: $MARK"
 echo "================================================================"
 echo
 
@@ -58,13 +61,13 @@ echo
 echo "================================================================"
 echo "yt-dlp exit code: $EXIT_CODE"
 echo
-echo "=== Files in ~/Downloads modified in the last ~minute ==="
-find "$DOWNLOADS" -maxdepth 1 -type f -newermt "@$((MARK - 5))" -print0 \
+echo "=== Files in ~/Downloads modified during this run ==="
+find "$DOWNLOADS" -maxdepth 1 -type f -newer "$MARK_FILE" -print0 \
     | xargs -0 -I{} ls -lh "{}" 2>/dev/null
 
 echo
 echo "=== ffprobe says (so you can verify actual resolution): ==="
-LAST_FILE=$(find "$DOWNLOADS" -maxdepth 1 -type f -newermt "@$((MARK - 5))" \
+LAST_FILE=$(find "$DOWNLOADS" -maxdepth 1 -type f -newer "$MARK_FILE" \
     \( -name "*.mp4" -o -name "*.mkv" -o -name "*.webm" -o -name "*.m4a" \) \
     | head -1)
 if [ -n "$LAST_FILE" ] && [ -x "$INSTALL_DIR/ffprobe" ]; then

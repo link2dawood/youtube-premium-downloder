@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+#
+# Diagnose which Chrome profile (if any) has cookies that prove channel
+# membership for a given members-only video. Iterates every profile in
+# Chrome's user-data dir, runs yt-dlp -F against the URL using each one's
+# cookies, and prints a one-line verdict per profile.
+#
+# Usage:
+#   bash tools/test-membership "<members-only video URL>"
+#
+# Run AFTER you've confirmed in Chrome that the video plays for you (i.e.
+# you're definitely a member somewhere). This script finds where that
+# somewhere is.
+
+set +e
+
+INSTALL_DIR="/Library/Application Support/PixelCatch"
+URL="${1:?Usage: bash tools/test-membership <video-url>}"
+CHROME_USER_DATA="$HOME/Library/Application Support/Google/Chrome"
+
+if [ ! -x "$INSTALL_DIR/yt-dlp" ]; then
+    echo "yt-dlp not found at $INSTALL_DIR/yt-dlp" >&2
+    echo "Install the helper first." >&2
+    exit 1
+fi
+
+if [ ! -d "$CHROME_USER_DATA" ]; then
+    echo "Chrome user data not found at $CHROME_USER_DATA" >&2
+    echo "Is Chrome installed at the standard location?" >&2
+    exit 1
+fi
+
+# Collect every profile dir Chrome knows about. Default is always there;
+# Profile 1, Profile 2, etc. are extra profiles the user added.
+PROFILES=()
+for dir in "$CHROME_USER_DATA"/Default "$CHROME_USER_DATA"/Profile\ *; do
+    [ -d "$dir" ] || continue
+    name=$(basename "$dir")
+    PROFILES+=("$name")
+done
+
+if [ ${#PROFILES[@]} -eq 0 ]; then
+    echo "No Chrome profiles found." >&2
+    exit 1
+fi
+
+echo "================================================================"
+echo "PixelCatch — membership diagnostic"
+echo "  URL:      $URL"
+echo "  Profiles: ${#PROFILES[@]} found"
+echo "================================================================"
+echo
+
+VERDICTS=()
+for profile in "${PROFILES[@]}"; do
+    echo "--- Profile: $profile ---"
+
+    # Try with the web client (the only one that uses cookies for auth).
+    out=$("$INSTALL_DIR/yt-dlp" \
+        --cookies-from-browser "chrome:$profile" \
+        --extractor-args "youtube:player_client=web" \
+        --no-playlist \
+        --simulate \
+        --quiet \
+        --no-warnings \
+        --print "%(format_id)s|%(width)sx%(height)s|%(format_note)s" \
+        -f "best" \
+        "$URL" 2>&1)
+    code=$?
+
+    if [ $code -eq 0 ]; then
+        echo "  ✓ MEMBER — yt-dlp got formats from this profile's cookies."
+        echo "    Top public format selectable: $out"
+        VERDICTS+=("$profile: MEMBER")
+    elif echo "$out" | grep -qi "join this channel"; then
+        echo "  ✗ NOT a member (or YouTube didn't accept this profile's cookies)."
+        VERDICTS+=("$profile: not a member")
+    elif echo "$out" | grep -qi "sign in"; then
+        echo "  ✗ Not signed in to YouTube in this profile."
+        VERDICTS+=("$profile: signed out")
+    elif echo "$out" | grep -qi "could not find profile"; then
+        echo "  ✗ yt-dlp couldn't read this profile's cookie DB."
+        VERDICTS+=("$profile: cookie read failed")
+    else
+        echo "  ? unexpected error (exit $code):"
+        echo "$out" | head -3 | sed 's/^/    /'
+        VERDICTS+=("$profile: error")
+    fi
+    echo
+done
+
+echo "================================================================"
+echo "Verdict per profile:"
+for v in "${VERDICTS[@]}"; do
+    echo "  $v"
+done
+echo
+echo "What to do:"
+MEMBER_PROFILE=""
+for v in "${VERDICTS[@]}"; do
+    if [[ "$v" == *": MEMBER" ]]; then
+        MEMBER_PROFILE="${v%%: *}"
+        break
+    fi
+done
+if [ -n "$MEMBER_PROFILE" ]; then
+    if [ "$MEMBER_PROFILE" = "Default" ]; then
+        echo "  Membership is on the Default profile, which is what PixelCatch"
+        echo "  already reads from. If downloads still say 'Join this channel',"
+        echo "  YouTube may still be propagating your new membership — wait 15-30"
+        echo "  min and retry."
+    else
+        echo "  Membership is on '$MEMBER_PROFILE', but PixelCatch's helper reads"
+        echo "  from the Default profile. Two ways to fix:"
+        echo "    1. (Easy)  In Chrome, sign out of YouTube on Default, then sign in"
+        echo "       with the same account you use in '$MEMBER_PROFILE'."
+        echo "    2. (Better) Tell me to add profile selection to PixelCatch so you"
+        echo "       can point the helper at '$MEMBER_PROFILE' from the popup."
+    fi
+else
+    echo "  No Chrome profile recognized you as a member of that channel."
+    echo "  Verify in Chrome by opening the URL directly:"
+    echo "    $URL"
+    echo "  If the video plays, the channel does recognize you — wait 30 min for"
+    echo "  membership propagation, then re-run this script."
+    echo "  If you see 'Join channel', you're not a member of THAT specific"
+    echo "  channel under any account on this Mac."
+fi
+echo "================================================================"
