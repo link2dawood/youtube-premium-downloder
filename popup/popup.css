@@ -618,6 +618,74 @@ button:disabled {
   display: none;
 }
 
+/* --- Persistent account-switcher bar (always visible in main UI) --- */
+
+.account-bar {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.account-bar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.account-bar-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.account-bar-hint {
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.4;
+}
+
+.account-bar-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.account-action {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 0;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.account-action:hover {
+  filter: brightness(1.05);
+}
+
+.account-action.ghost {
+  background: #fff;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+}
+
+.account-action.ghost:hover {
+  background: #f1f5f9;
+}
+
 /* --- Sign-in onboarding banner --- */
 
 .signin-banner {

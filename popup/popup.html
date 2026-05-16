@@ -40,6 +40,7 @@
         <p class="signin-body">PixelCatch downloads use your existing Chrome session. Sign in to YouTube in Chrome — and confirm your Premium subscription or channel membership is active — before downloading gated content.</p>
         <div class="signin-actions">
           <button id="open-youtube-button" type="button" class="signin-primary">Open YouTube</button>
+          <button id="switch-account-banner-button" type="button" class="signin-secondary">Switch account</button>
           <button id="confirm-signin-button" type="button" class="signin-secondary">I'm signed in</button>
         </div>
       </section>
@@ -90,6 +91,17 @@
         <div class="last-video-row">
           <span class="meta-label">Last:</span>
           <span id="last-video" class="last-video-label">Never</span>
+        </div>
+
+        <div class="account-bar">
+          <div class="account-bar-text">
+            <span class="account-bar-label">YouTube session</span>
+            <span class="account-bar-hint">Downloads use whichever Google account is signed in to Chrome.</span>
+          </div>
+          <div class="account-bar-actions">
+            <button id="switch-account-button" type="button" class="account-action">Switch account</button>
+            <button id="manage-youtube-button" type="button" class="account-action ghost">Open YouTube</button>
+          </div>
         </div>
       </section>
     </main>

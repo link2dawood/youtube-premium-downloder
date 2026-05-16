@@ -62,6 +62,9 @@ const els = {
   signinBanner: document.querySelector("#signin-banner"),
   openYouTubeButton: document.querySelector("#open-youtube-button"),
   confirmSigninButton: document.querySelector("#confirm-signin-button"),
+  switchAccountBannerButton: document.querySelector("#switch-account-banner-button"),
+  switchAccountButton: document.querySelector("#switch-account-button"),
+  manageYouTubeButton: document.querySelector("#manage-youtube-button"),
   setupPanel: document.querySelector("#setup-panel"),
   setupDownloadButton: document.querySelector("#setup-download-button"),
   setupRecheckButton: document.querySelector("#setup-recheck-button"),
@@ -525,6 +528,24 @@ els.openYouTubeStudioButton.addEventListener("click", () => {
 });
 
 els.openYouTubeButton.addEventListener("click", () => {
+  chrome.tabs.create({ url: "https://www.youtube.com/" });
+});
+
+// --- Switch Google account ---
+//
+// AccountChooser shows every Google account already added to Chrome and lets
+// the user pick one. After they pick, the `continue` parameter sends them to
+// youtube.com signed in as that account — so PixelCatch's cookies-from-browser
+// read picks up the new session on the next download.
+const SWITCH_ACCOUNT_URL = "https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Fwww.youtube.com%2F";
+
+function openSwitchAccount() {
+  chrome.tabs.create({ url: SWITCH_ACCOUNT_URL });
+}
+
+els.switchAccountBannerButton?.addEventListener("click", openSwitchAccount);
+els.switchAccountButton?.addEventListener("click", openSwitchAccount);
+els.manageYouTubeButton?.addEventListener("click", () => {
   chrome.tabs.create({ url: "https://www.youtube.com/" });
 });
 
