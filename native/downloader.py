@@ -607,18 +607,18 @@ def run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key):
         attempt_label = f"attempt {idx + 1}/{len(fmt_chain)}"
         log(f"--- {attempt_label} with -f {fmt[:120]}")
 
-        # Hint the popup that we're (re)connecting if we're retrying.
+        # Hint the popup that we're (re)connecting if we're retrying. Keep
+        # the message short — the popup shows this in the progress card and
+        # repeating the full error every time looks like the same failure
+        # firing over and over.
         if idx > 0:
             send_message({
                 "type": "progress",
                 "percent": 0,
-                "filename": "Retrying with broader quality preset…",
+                "filename": f"Trying alternative format ({attempt_label})…",
                 "speed": "",
                 "eta": "",
-                "status": (
-                    f"Previous attempt blocked ({last_error[:120]}); "
-                    f"trying fallback {attempt_label}."
-                ),
+                "status": "Previous quality wasn't available — trying a broader option.",
             })
 
         result = _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key)
@@ -642,8 +642,22 @@ def run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key):
         if not _is_retryable_error(last_error):
             break
 
-    # All attempts failed — emit the last error.
+    # All attempts failed — emit a focused, actionable error.
     error_msg = last_error or "Download failed after exhausting all format fallbacks."
+
+    if _is_retryable_error(error_msg):
+        # Every fallback hit a members-only / 403 gate. Don't just echo the
+        # raw "Join this channel" — tell the user what to actually check.
+        error_msg = (
+            "This video is members-only. Every quality option we tried "
+            f"({len(fmt_chain)} attempts including 4K/1080p/720p/audio-only) "
+            "was blocked by YouTube. Either you're not a paying member of this "
+            "channel, or you're a member with a DIFFERENT Google account than "
+            "the one currently active in Chrome. Open the video URL in Chrome — "
+            "if it plays, switch accounts via the popup's Switch Account button. "
+            "If you see a 'Join channel' button instead, you'd need to actually join."
+        )
+
     if IS_MAC and "exited with code 255" in error_msg.lower():
         error_msg += (
             " On macOS this is usually Gatekeeper blocking yt-dlp's bundled"
