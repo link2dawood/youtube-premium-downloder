@@ -716,6 +716,12 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
     cmd = [
         ytdlp,
         "--cookies-from-browser", "chrome",
+        # CRITICAL: --print (used below for [selected] logging) IMPLIES
+        # --quiet AND --simulate by default. Without --no-simulate, yt-dlp
+        # would resolve metadata, exit 0, and download nothing — making
+        # every "successful" run a phantom that wrote no file. This bug
+        # silently no-op'd downloads for weeks.
+        "--no-simulate",
         # `lang=en` makes the YouTube extractor request English metadata
         # (title, description) and prefer English-tagged audio tracks. Many
         # large channels now upload dubbed audio tracks in 5–10 languages;
