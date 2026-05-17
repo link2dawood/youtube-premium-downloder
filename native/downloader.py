@@ -187,27 +187,23 @@ FORMAT_PRESETS = {
     # AV1, which won't fit in mp4. The runner uses --merge-output-format
     # mp4/mkv so the output is mp4 when codecs allow, mkv when they don't.
     #
-    # Audio language: the format selector lists FOUR fallbacks, each tighter
-    # than the next. yt-dlp picks the first one that matches:
-    #   1. video + audio explicitly in English
-    #   2. video + audio with no language tag (mono-language videos)
-    #   3. video + any audio (gives up on language)
-    #   4. any combined stream at this resolution
-    # This is much stricter than just sorting — multi-track videos that
-    # default to Spanish/Hindi/Ukrainian dubs now reliably get English.
+    # Audio language: the format selector lists fallbacks separated by /.
+    # yt-dlp picks the FIRST one that matches. For each preset:
+    #   1. video + audio explicitly tagged English (multi-track videos)
+    #   2. video + any audio (single-language videos, or no-English videos)
+    #   3. any combined stream at this resolution (last-resort fallback)
+    # The -S "lang" key adds a soft preference among equally-valid candidates.
     "best": (
-        "bv*+ba[language^=en]/bv*+ba[language=]/bv*+ba/best",
+        "bv*+ba[language^=en]/bv*+ba/best",
         "res,tbr,fps,vcodec:av01,acodec:opus,lang,channels",
     ),
     "4k": (
         "bv*[height<=2160]+ba[language^=en]/"
-        "bv*[height<=2160]+ba[language=]/"
         "bv*[height<=2160]+ba/best[height<=2160]",
         "res:2160,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
     "2k": (
         "bv*[height<=1440]+ba[language^=en]/"
-        "bv*[height<=1440]+ba[language=]/"
         "bv*[height<=1440]+ba/best[height<=1440]",
         "res:1440,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
@@ -216,21 +212,18 @@ FORMAT_PRESETS = {
     # English so the output is always a clean .mp4 file in your language.
     "1080p": (
         "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/"
-        "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language=]/"
         "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
         "best[height<=1080][ext=mp4]/best[height<=1080]",
         "res:1080,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
     "720p": (
         "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/"
-        "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language=]/"
         "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
         "best[height<=720][ext=mp4]/best[height<=720]",
         "res:720,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
     "480p": (
         "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/"
-        "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language=]/"
         "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
         "best[height<=480][ext=mp4]/best[height<=480]",
         "res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang",
