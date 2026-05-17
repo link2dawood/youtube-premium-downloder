@@ -181,60 +181,115 @@ YOUTUBE_HOSTS = {
 #   - Authentication for Premium / members-only happens via cookies; the format
 #     string itself doesn't change — yt-dlp will simply have access to higher
 #     bitrate streams when the cookies grant membership.
+# Each preset is (fmt_chain, sort_str). fmt_chain is a LIST of yt-dlp format
+# selectors tried in order — first one that downloads successfully wins. On
+# members-only / 403 errors we drop to the next selector. This is critical
+# because some videos have their ideal-quality combination gated behind
+# channel membership while a lower-quality (or different-codec) version is
+# publicly available — yt-dlp's manifest-time `/` fallback doesn't help
+# because it picks on EXISTENCE, not on DOWNLOAD-ABILITY.
 FORMAT_PRESETS = {
     # "best" / 2K / 4K — let yt-dlp pick the highest-quality stream.
-    # YouTube only serves AVC up to 1080p, so anything ≥1440p means VP9 or
-    # AV1, which won't fit in mp4. The runner uses --merge-output-format
-    # mp4/mkv so the output is mp4 when codecs allow, mkv when they don't.
-    #
-    # Audio language: the format selector lists fallbacks separated by /.
-    # yt-dlp picks the FIRST one that matches. For each preset:
-    #   1. video + audio explicitly tagged English (multi-track videos)
-    #   2. video + any audio (single-language videos, or no-English videos)
-    #   3. any combined stream at this resolution (last-resort fallback)
-    # The -S "lang" key adds a soft preference among equally-valid candidates.
     "best": (
-        "bv*+ba[language~='^(en|eng)']/bv*+ba/best",
+        [
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba",
+            "best",
+        ],
         "res,tbr,fps,vcodec:av01,acodec:opus,lang,channels",
     ),
     "4k": (
-        "bv*[height<=2160]+ba[language~='^(en|eng)']/"
-        "bv*[height<=2160]+ba/best[height<=2160]",
+        [
+            "bv*[height<=2160]+ba[language~='^(en|eng)']",
+            "bv*[height<=2160]+ba",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba",
+            "best",
+        ],
         "res:2160,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
     "2k": (
-        "bv*[height<=1440]+ba[language~='^(en|eng)']/"
-        "bv*[height<=1440]+ba/best[height<=1440]",
+        [
+            "bv*[height<=1440]+ba[language~='^(en|eng)']",
+            "bv*[height<=1440]+ba",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba",
+            "best",
+        ],
         "res:1440,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
-
     # 1080p / 720p / 480p — prefer AVC (H.264) video + AAC (m4a) audio in
-    # English so the output is always a clean .mp4 file in your language.
+    # English (clean .mp4 output). On member-gate errors, drop the AVC and
+    # m4a constraints in turn, finally dropping resolution.
     "1080p": (
-        "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/"
-        "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
-        "best[height<=1080][ext=mp4]/best[height<=1080]",
+        [
+            "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=1080]+ba[language~='^(en|eng)']",
+            "bv*[height<=1080]+ba",
+            "best[height<=1080]",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba",
+            "best",
+        ],
         "res:1080,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
     "720p": (
-        "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/"
-        "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
-        "best[height<=720][ext=mp4]/best[height<=720]",
+        [
+            "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=720]+ba[language~='^(en|eng)']",
+            "bv*[height<=720]+ba",
+            "best[height<=720]",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba",
+            "best",
+        ],
         "res:720,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
     "480p": (
-        "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/"
-        "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
-        "best[height<=480][ext=mp4]/best[height<=480]",
+        [
+            "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=480]+ba[language~='^(en|eng)']",
+            "bv*[height<=480]+ba",
+            "best[height<=480]",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba",
+            "best",
+        ],
         "res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
-
-    # Audio-only — m4a (AAC) preferred so it plays in everything.
+    # Audio-only.
     "audio": (
-        "ba[ext=m4a][language~='^(en|eng)']/ba[language~='^(en|eng)']/ba[ext=m4a]/ba/best",
+        [
+            "ba[ext=m4a][language~='^(en|eng)']",
+            "ba[language~='^(en|eng)']",
+            "ba[ext=m4a]",
+            "ba",
+            "best",
+        ],
         "abr,acodec:m4a:opus,lang",
     ),
 }
+
+# Substrings in yt-dlp's error output that mean "this specific format is
+# blocked but a different one might work" — triggers our chain fallback.
+RETRYABLE_ERROR_PATTERNS = (
+    "join this channel",
+    "members-only",
+    "members only",
+    "available to this channel's members",
+    "members get full access",
+    "http error 403",
+    "http error 401",
+    "this video is private",
+    "video unavailable",
+)
+
+
+def _is_retryable_error(text):
+    if not text:
+        return False
+    lower = text.lower()
+    return any(p in lower for p in RETRYABLE_ERROR_PATTERNS)
 
 # Quality keys that download audio-only. The runner skips video merge args
 # for these so yt-dlp doesn't try to merge a non-existent video stream.
@@ -337,7 +392,7 @@ def validate_and_normalize_message(msg):
     if format_key not in FORMAT_PRESETS:
         allowed = ", ".join(sorted(FORMAT_PRESETS))
         raise ValidationError(f"Unknown format {format_key!r}. Allowed: {allowed}.")
-    format_string, sort_string = FORMAT_PRESETS[format_key]
+    format_chain, sort_string = FORMAT_PRESETS[format_key]
 
     # Download path: prefer the symbolic `saveLocation` (popup's "Save to"
     # dropdown). Fall back to the raw `downloadPath` for back-compat / when
@@ -381,7 +436,7 @@ def validate_and_normalize_message(msg):
     else:
         download_path = DEFAULT_DOWNLOAD_DIR
 
-    return url, format_string, sort_string, download_path, format_key
+    return url, format_chain, sort_string, download_path, format_key
 
 
 # ---------- yt-dlp discovery ----------
@@ -535,7 +590,71 @@ def _terminate_active(_sig=None, _frame=None):
     sys.exit(0)
 
 
-def run_download(url, download_path, ytdlp, fmt, sort_order, format_key):
+def run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key):
+    """
+    Try each format selector in fmt_chain in order. The first one that
+    downloads successfully wins. On members-only / 403 errors we try the
+    next; on any other error we stop immediately (those aren't fixable by
+    picking a different format). Sends ONE final done/error message to the
+    popup regardless of how many attempts ran.
+    """
+    # Back-compat: if a caller passes a single string, wrap it in a list.
+    if isinstance(fmt_chain, str):
+        fmt_chain = [fmt_chain]
+
+    last_error = ""
+    for idx, fmt in enumerate(fmt_chain):
+        attempt_label = f"attempt {idx + 1}/{len(fmt_chain)}"
+        log(f"--- {attempt_label} with -f {fmt[:120]}")
+
+        # Hint the popup that we're (re)connecting if we're retrying.
+        if idx > 0:
+            send_message({
+                "type": "progress",
+                "percent": 0,
+                "filename": "Retrying with broader quality preset…",
+                "speed": "",
+                "eta": "",
+                "status": (
+                    f"Previous attempt blocked ({last_error[:120]}); "
+                    f"trying fallback {attempt_label}."
+                ),
+            })
+
+        result = _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key)
+
+        if result["ok"]:
+            # Success — emit the final done message and return.
+            send_message({
+                "type": "done",
+                "filename": result["filename"] or "Complete",
+                "message": (
+                    f"Saved to {download_path}/{result['filename']}"
+                    if result["filename"] else f"Download complete. Check {download_path}."
+                ),
+            })
+            return
+
+        last_error = result["error"]
+
+        # Non-retryable errors stop the chain immediately (no point trying a
+        # different format if cookies are missing, network is down, etc.).
+        if not _is_retryable_error(last_error):
+            break
+
+    # All attempts failed — emit the last error.
+    error_msg = last_error or "Download failed after exhausting all format fallbacks."
+    if IS_MAC and "exited with code 255" in error_msg.lower():
+        error_msg += (
+            " On macOS this is usually Gatekeeper blocking yt-dlp's bundled"
+            " Python. Fix: open Terminal and run "
+            'sudo xattr -dr com.apple.quarantine "/Library/Application Support/PixelCatch"'
+        )
+    send_message({"type": "error", "error": error_msg})
+
+
+def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
+    """One yt-dlp run. Returns {ok, filename, error}."""
     global _active_proc
     filename = ""
     audio_only = format_key in AUDIO_ONLY_FORMATS
@@ -665,34 +784,12 @@ def run_download(url, download_path, ytdlp, fmt, sort_order, format_key):
     _active_proc = None
 
     if proc.returncode == 0:
-        send_message({
-            "type": "done",
-            "filename": filename or "Complete",
-            "message": (
-                f"Saved to {download_path}/{filename}"
-                if filename else f"Download complete. Check {download_path}."
-            ),
-        })
-    else:
-        error_msg = last_error or f"yt-dlp exited with code {proc.returncode}."
-
-        # On macOS, exit 255 with no captured error is almost always Gatekeeper
-        # killing the bundled Python.framework inside yt-dlp because the .pkg
-        # was downloaded from the internet and its quarantine flag propagated
-        # to the installed files. Surface the one-line fix instead of leaving
-        # the user staring at a number.
-        if (
-            IS_MAC
-            and proc.returncode == 255
-            and not last_error
-        ):
-            error_msg += (
-                " On macOS this is usually Gatekeeper blocking yt-dlp's bundled"
-                " Python. Fix: open Terminal and run "
-                'sudo xattr -dr com.apple.quarantine "/Library/Application Support/PixelCatch"'
-            )
-
-        send_message({"type": "error", "error": error_msg})
+        return {"ok": True, "filename": filename, "error": ""}
+    return {
+        "ok": False,
+        "filename": filename,
+        "error": last_error or f"yt-dlp exited with code {proc.returncode}.",
+    }
 
 
 # ---------- Entry point ----------
@@ -725,7 +822,7 @@ def main():
         return
 
     try:
-        url, fmt, sort_order, download_path, format_key = validate_and_normalize_message(message)
+        url, fmt_chain, sort_order, download_path, format_key = validate_and_normalize_message(message)
     except ValidationError as exc:
         send_message({"type": "error", "error": str(exc)})
         return
@@ -745,7 +842,7 @@ def main():
         })
         return
 
-    run_download(url, download_path, ytdlp, fmt, sort_order, format_key)
+    run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key)
 
 
 if __name__ == "__main__":
