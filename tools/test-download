@@ -1,96 +1,67 @@
 #!/usr/bin/env bash
 #
-# Bypass the popup and run a real download with the exact same yt-dlp
-# invocation the helper uses. Prints everything along the way so we can see
-# what file lands, what resolution it actually is, and any merge errors.
+# End-to-end test of the installed PixelCatch helper. Sends a real native-
+# messaging frame to /Library/Application Support/PixelCatch/downloader.py,
+# streams the progress / done / error events, and reports the resulting file.
+#
+# Because this invokes the actual helper, the runtime format-fallback chain
+# (members-only → broader selector → 'best') is exercised exactly as the
+# popup would trigger it. No duplicated format-string logic.
 #
 # Usage:
-#   bash tools/test-download                                   # Big Buck Bunny 4K
-#   bash tools/test-download "<URL>"                           # any video
-#   bash tools/test-download "<URL>" 1080p                     # specific preset
+#   bash tools/test-download                                   # 4K Big Buck Bunny
+#   bash tools/test-download "<URL>"                           # any video, 4K
+#   bash tools/test-download "<URL>" <preset>                  # specific preset
+#   bash tools/test-download "<URL>" <preset> <save-location>  # e.g. "movies"
 #
-# Presets: best 4k 2k 1080p 720p 480p audio
+# Preset:        best 4k 2k 1080p 720p 480p audio
+# Save location: downloads movies videos desktop documents
 
 set +e
 
 INSTALL_DIR="/Library/Application Support/PixelCatch"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BRIDGE="$REPO_ROOT/tools/_helper-bridge.py"
 URL="${1:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}"
 PRESET="${2:-4k}"
-
-# Format presets — kept in sync with FORMAT_PRESETS in native/downloader.py.
-# Audio filter [language~='^(en|eng)'] forces English audio for multi-track videos,
-# with a fallback to any audio when no English track exists.
-case "$PRESET" in
-    best)
-        FMT="bv*+ba[language~='^(en|eng)']/bv*+ba/best"
-        SORT="res,tbr,fps,vcodec:av01,acodec:opus,lang,channels" ;;
-    4k)
-        FMT="bv*[height<=2160]+ba[language~='^(en|eng)']/bv*[height<=2160]+ba/best[height<=2160]"
-        SORT="res:2160,tbr,fps,vcodec:av01,acodec:opus,lang" ;;
-    2k)
-        FMT="bv*[height<=1440]+ba[language~='^(en|eng)']/bv*[height<=1440]+ba/best[height<=1440]"
-        SORT="res:1440,tbr,fps,vcodec:av01,acodec:opus,lang" ;;
-    1080p)
-        FMT="bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]"
-        SORT="res:1080,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
-    720p)
-        FMT="bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"
-        SORT="res:720,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
-    480p)
-        FMT="bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]"
-        SORT="res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
-    audio)
-        FMT="ba[ext=m4a][language~='^(en|eng)']/ba[language~='^(en|eng)']/ba[ext=m4a]/ba/best"
-        SORT="abr,acodec:m4a:opus,lang" ;;
-    *)
-        echo "Unknown preset: $PRESET" >&2; exit 1 ;;
-esac
-
+SAVE_LOC="${3:-}"
 DOWNLOADS="$HOME/Downloads"
-# BSD find on macOS doesn't support GNU's `-newermt "@<epoch>"` syntax.
-# Instead, drop a reference file before the download and use `-newer` against
-# it afterward — works on both BSD and GNU find.
+
+if [ ! -f "$BRIDGE" ]; then
+    echo "Helper bridge not found at $BRIDGE" >&2
+    exit 1
+fi
+
+# Mark file so we can tell which files in ~/Downloads are from THIS run.
 MARK_FILE=$(mktemp -t pc-test-mark)
 trap 'rm -f "$MARK_FILE"' EXIT
+
 echo "================================================================"
-echo "PixelCatch test download"
+echo "PixelCatch test download (via helper)"
 echo "  URL:       $URL"
 echo "  Preset:    $PRESET"
-echo "  -f:        $FMT"
-echo "  -S:        $SORT"
-echo "  Save to:   $DOWNLOADS"
+echo "  Save to:   ${SAVE_LOC:-(default — Downloads)}"
+echo "  Helper:    $INSTALL_DIR/downloader.py"
 echo "================================================================"
 echo
 
-"$INSTALL_DIR/yt-dlp" \
-    --cookies-from-browser chrome \
-    --extractor-args "youtube:player_client=tv,web,web_safari,mweb;lang=en" \
-    --no-playlist \
-    -f "$FMT" \
-    -S "$SORT" \
-    --merge-output-format mp4/mkv \
-    --newline \
-    --print "[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s lang=%(language)s" \
-    -o "$DOWNLOADS/%(title)s.%(ext)s" \
-    "$URL"
-EXIT_CODE=$?
+python3 "$BRIDGE" "$URL" "$PRESET" "$SAVE_LOC"
+HELPER_EXIT=$?
 
 echo
 echo "================================================================"
-echo "yt-dlp exit code: $EXIT_CODE"
+echo "Helper exit code: $HELPER_EXIT"
 echo
 echo "=== 5 most recent files in ~/Downloads ==="
 ls -lht "$DOWNLOADS" 2>/dev/null | head -6
 
 echo
-echo "=== Files modified during this run (newer than $MARK_FILE) ==="
+echo "=== Files modified during this run (newer than mark) ==="
 find "$DOWNLOADS" -maxdepth 1 -type f -newer "$MARK_FILE" 2>/dev/null \
     | while IFS= read -r f; do ls -lh "$f"; done
 
 echo
 echo "=== ffprobe says (so you can verify actual resolution): ==="
-# Try the "newer than mark" approach first; if that finds nothing (sudo env
-# can desync mtimes), fall back to the single newest video file in ~/Downloads.
 LAST_FILE=$(find "$DOWNLOADS" -maxdepth 1 -type f -newer "$MARK_FILE" 2>/dev/null \
     \( -name "*.mp4" -o -name "*.mkv" -o -name "*.webm" -o -name "*.m4a" \) \
     | head -1)
@@ -101,11 +72,16 @@ if [ -n "$LAST_FILE" ] && [ -x "$INSTALL_DIR/ffprobe" ]; then
     "$INSTALL_DIR/ffprobe" -v error -select_streams v:0 \
         -show_entries stream=width,height,codec_name,bit_rate \
         -of default=noprint_wrappers=1 "$LAST_FILE" 2>&1
+    # Show audio stream info too — confirms which language got picked.
     echo
-    echo "File:  $LAST_FILE"
-    echo "Size:  $(du -h "$LAST_FILE" | cut -f1)"
+    "$INSTALL_DIR/ffprobe" -v error -select_streams a:0 \
+        -show_entries stream=codec_name,sample_rate,channels:stream_tags=language \
+        -of default=noprint_wrappers=1 "$LAST_FILE" 2>&1
+    echo
+    echo "File: $LAST_FILE"
+    echo "Size: $(du -h "$LAST_FILE" | cut -f1)"
 else
     echo "No video file found in ~/Downloads from this run."
-    echo "(If yt-dlp exited non-zero above, see the error message for why.)"
+    echo "(If the helper exited non-zero above, see the error for why.)"
 fi
 echo "================================================================"
