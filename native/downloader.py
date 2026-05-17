@@ -194,24 +194,42 @@ YOUTUBE_HOSTS = {
 # videos the English audio is gated to channel members but lower-quality
 # English (or English at lower resolution) is public — we want that over
 # a Spanish/Hindi/Ukrainian dub at the user's preferred resolution.
+# yt-dlp audio format ID conventions on YouTube:
+#   * "140", "251", "249", "250"  — ORIGINAL audio track for the video.
+#     For English-language channels this is the actual English you want.
+#   * "140-0", "140-1", "140-N"   — DUBBED audio tracks. Each -N is a
+#     language variant (English-US, Spanish, Hindi, Portuguese, etc.).
+#     Some of these are auto-generated synthetic dubs even when tagged "en".
+#
+# Strategy: prefer ORIGINAL audio (no -N suffix → regex `^[0-9]+$` on
+# format_id) when the channel is producing the content in the user's
+# language. Only fall through to language-tagged dubs when no original
+# matches our other constraints.
+ORIGINAL_AUDIO_FILTER = "[format_id~='^[0-9]+$']"
+
 FORMAT_PRESETS = {
     # "best" / 2K / 4K — let yt-dlp pick the highest-quality stream.
     "best": (
         [
-            "bv*+ba[language~='^(en|eng)']",  # English-preferred
-            "bv*+ba",                          # any language
+            f"bv*+ba{ORIGINAL_AUDIO_FILTER}",                         # original audio (most reliable)
+            "bv*+ba[language~='^(en|eng)']",                          # English-tagged variant
+            "bv*+ba",                                                  # any language
             "best",
         ],
         "res,tbr,fps,vcodec:av01,acodec:opus,lang,channels",
     ),
     "4k": (
         [
-            # === English-required phase (drop quality before language) ===
+            # === Original-audio phase (prefers untagged English from English channels) ===
+            f"bv*[height<=2160]+ba{ORIGINAL_AUDIO_FILTER}",
+            f"bv*[height<=1440]+ba{ORIGINAL_AUDIO_FILTER}",
+            f"bv*[height<=1080]+ba{ORIGINAL_AUDIO_FILTER}",
+            # === English-tagged variants (multi-lang videos with dubs) ===
             "bv*[height<=2160]+ba[language~='^(en|eng)']",
             "bv*[height<=1440]+ba[language~='^(en|eng)']",
             "bv*[height<=1080]+ba[language~='^(en|eng)']",
             "bv*+ba[language~='^(en|eng)']",
-            # === Accept any language (last resort) ===
+            # === Any language (last resort) ===
             "bv*[height<=2160]+ba",
             "bv*+ba",
             "best",
@@ -220,28 +238,31 @@ FORMAT_PRESETS = {
     ),
     "2k": (
         [
-            # English-required phase
+            f"bv*[height<=1440]+ba{ORIGINAL_AUDIO_FILTER}",
+            f"bv*[height<=1080]+ba{ORIGINAL_AUDIO_FILTER}",
             "bv*[height<=1440]+ba[language~='^(en|eng)']",
             "bv*[height<=1080]+ba[language~='^(en|eng)']",
             "bv*+ba[language~='^(en|eng)']",
-            # Any language
             "bv*[height<=1440]+ba",
             "bv*+ba",
             "best",
         ],
         "res:1440,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
-    # 1080p / 720p / 480p — prefer AVC (H.264) video + AAC (m4a) audio in
-    # English (clean .mp4 output). Exhaust English options at every
-    # resolution before falling back to non-English.
+    # 1080p / 720p / 480p — prefer AVC (H.264) video + AAC (m4a) audio.
+    # ORIGINAL audio (no -N suffix) is preferred over English-tagged dubs.
     "1080p": (
         [
-            # === English-required phase ===
+            # Tier 1: 1080p AVC mp4 + original AAC audio (the ideal mp4 download)
+            f"bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]{ORIGINAL_AUDIO_FILTER}",
+            f"bv*[height<=1080]+ba{ORIGINAL_AUDIO_FILTER}",
+            f"bv*[height<=720]+ba{ORIGINAL_AUDIO_FILTER}",
+            f"bv*+ba{ORIGINAL_AUDIO_FILTER}",
+            # Tier 2: English-tagged variants (only if no original matched)
             "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
             "bv*[height<=1080]+ba[language~='^(en|eng)']",
-            "bv*[height<=720]+ba[language~='^(en|eng)']",
             "bv*+ba[language~='^(en|eng)']",
-            # === Any language (last resort) ===
+            # Tier 3: any language (last resort)
             "bv*[height<=1080]+ba",
             "best[height<=1080]",
             "bv*+ba",
@@ -251,12 +272,12 @@ FORMAT_PRESETS = {
     ),
     "720p": (
         [
-            # English-required phase
+            f"bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]{ORIGINAL_AUDIO_FILTER}",
+            f"bv*[height<=720]+ba{ORIGINAL_AUDIO_FILTER}",
+            f"bv*+ba{ORIGINAL_AUDIO_FILTER}",
             "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
             "bv*[height<=720]+ba[language~='^(en|eng)']",
-            "bv*[height<=480]+ba[language~='^(en|eng)']",
             "bv*+ba[language~='^(en|eng)']",
-            # Any language
             "bv*[height<=720]+ba",
             "best[height<=720]",
             "bv*+ba",
@@ -266,11 +287,12 @@ FORMAT_PRESETS = {
     ),
     "480p": (
         [
-            # English-required phase
+            f"bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]{ORIGINAL_AUDIO_FILTER}",
+            f"bv*[height<=480]+ba{ORIGINAL_AUDIO_FILTER}",
+            f"bv*+ba{ORIGINAL_AUDIO_FILTER}",
             "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
             "bv*[height<=480]+ba[language~='^(en|eng)']",
             "bv*+ba[language~='^(en|eng)']",
-            # Any language
             "bv*[height<=480]+ba",
             "best[height<=480]",
             "bv*+ba",
@@ -278,9 +300,11 @@ FORMAT_PRESETS = {
         ],
         "res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
-    # Audio-only.
+    # Audio-only: original audio first, then English-tagged, then anything.
     "audio": (
         [
+            f"ba[ext=m4a]{ORIGINAL_AUDIO_FILTER}",
+            f"ba{ORIGINAL_AUDIO_FILTER}",
             "ba[ext=m4a][language~='^(en|eng)']",
             "ba[language~='^(en|eng)']",
             "ba[ext=m4a]",
