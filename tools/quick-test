@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# The one command. Updates the on-disk helper to whatever is in the repo,
+# runs a real test download, and reports the result.
+#
+# Usage:
+#   sudo bash tools/quick-test                                   # 4K Big Buck Bunny
+#   sudo bash tools/quick-test <URL>                             # any video, 4K
+#   sudo bash tools/quick-test <URL> <preset>                    # specific preset
+#
+# Preset: best 4k 2k 1080p 720p 480p audio   (default: 4k)
+
+set +e
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Run with sudo:  sudo bash tools/quick-test [URL] [preset]" >&2
+    exit 1
+fi
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+URL="${1:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}"
+PRESET="${2:-4k}"
+
+echo "================================================================"
+echo "1/2 — Updating on-disk helper from repo..."
+echo "================================================================"
+bash "$REPO_ROOT/tools/update-mac-helper" || exit $?
+
+echo
+echo "================================================================"
+echo "2/2 — Test download"
+echo "  URL:    $URL"
+echo "  Preset: $PRESET"
+echo "================================================================"
+
+# Drop sudo for the download itself so files land owned by the user, not root.
+INVOKING_USER="${SUDO_USER:-$USER}"
+sudo -u "$INVOKING_USER" bash "$REPO_ROOT/tools/test-download" "$URL" "$PRESET"

@@ -17,15 +17,35 @@ INSTALL_DIR="/Library/Application Support/PixelCatch"
 URL="${1:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}"
 PRESET="${2:-4k}"
 
+# Format presets — kept in sync with FORMAT_PRESETS in native/downloader.py.
+# 1080p / 720p / 480p strongly prefer AVC + AAC so output is always a clean mp4.
+# 2K / 4K accept VP9 / AV1 (YouTube doesn't serve AVC above 1080p) and use the
+# runner's --merge-output-format mp4/mkv fallback. `lang` appears in every
+# sort key so multi-track videos pick the English audio.
 case "$PRESET" in
-    best)  FMT="bv*+ba/best";                                       SORT="res,tbr,fps,vcodec:av01,acodec:opus" ;;
-    4k)    FMT="bv*[height<=2160]+ba/best[height<=2160]";           SORT="res:2160,tbr,fps,vcodec:av01,acodec:opus" ;;
-    2k)    FMT="bv*[height<=1440]+ba/best[height<=1440]";           SORT="res:1440,tbr,fps,vcodec:av01,acodec:opus" ;;
-    1080p) FMT="bv*[height<=1080]+ba/best[height<=1080]";           SORT="res:1080,tbr,fps,vcodec:vp09,acodec:opus" ;;
-    720p)  FMT="bv*[height<=720]+ba/best[height<=720]";             SORT="res:720,tbr,fps" ;;
-    480p)  FMT="bv*[height<=480]+ba/best[height<=480]";             SORT="res:480,tbr,fps" ;;
-    audio) FMT="ba[ext=m4a]/ba/best";                               SORT="abr,acodec:opus" ;;
-    *) echo "Unknown preset: $PRESET" >&2; exit 1 ;;
+    best)
+        FMT="bv*+ba/best"
+        SORT="res,tbr,fps,vcodec:av01,acodec:opus,lang,channels" ;;
+    4k)
+        FMT="bv*[height<=2160]+ba/best[height<=2160]"
+        SORT="res:2160,tbr,fps,vcodec:av01,acodec:opus,lang" ;;
+    2k)
+        FMT="bv*[height<=1440]+ba/best[height<=1440]"
+        SORT="res:1440,tbr,fps,vcodec:av01,acodec:opus,lang" ;;
+    1080p)
+        FMT="bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]"
+        SORT="res:1080,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
+    720p)
+        FMT="bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"
+        SORT="res:720,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
+    480p)
+        FMT="bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]"
+        SORT="res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
+    audio)
+        FMT="ba[ext=m4a]/ba/best"
+        SORT="abr,acodec:m4a:opus,lang" ;;
+    *)
+        echo "Unknown preset: $PRESET" >&2; exit 1 ;;
 esac
 
 DOWNLOADS="$HOME/Downloads"
@@ -46,13 +66,13 @@ echo
 
 "$INSTALL_DIR/yt-dlp" \
     --cookies-from-browser chrome \
-    --extractor-args "youtube:player_client=tv,web,web_safari,mweb" \
+    --extractor-args "youtube:player_client=tv,web,web_safari,mweb;lang=en" \
     --no-playlist \
     -f "$FMT" \
     -S "$SORT" \
     --merge-output-format mp4/mkv \
     --newline \
-    --print "[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s" \
+    --print "[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s lang=%(language)s" \
     -o "$DOWNLOADS/%(title)s.%(ext)s" \
     "$URL"
 EXIT_CODE=$?
