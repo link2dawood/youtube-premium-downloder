@@ -498,6 +498,145 @@ def validate_and_normalize_message(msg):
 
 # ---------- yt-dlp discovery ----------
 
+# ---------- Chrome profile auto-detection ----------
+#
+# yt-dlp's --cookies-from-browser chrome reads ONLY the Default profile.
+# For multi-profile users, the membership account is often in a different
+# profile, so YouTube returns "Join this channel" even though the user is a
+# paying member.
+#
+# We enumerate every profile in ~/Library/Application Support/Google/Chrome/,
+# try each as the cookie source, and use the first one whose cookies pass
+# YouTube's auth. The result is cached per-channel so we don't probe again.
+
+_PROFILE_CACHE_PATH = os.path.expanduser("~/Library/Caches/com.pixelcatch.downloader/profile-cache.json")
+
+
+def _chrome_profiles_dir():
+    if IS_MAC:
+        return os.path.expanduser("~/Library/Application Support/Google/Chrome")
+    if IS_LINUX:
+        return os.path.expanduser("~/.config/google-chrome")
+    if IS_WINDOWS:
+        local = os.environ.get("LOCALAPPDATA", "")
+        return os.path.join(local, "Google", "Chrome", "User Data")
+    return ""
+
+
+def _list_chrome_profiles():
+    """Return list of profile directory names like ['Default', 'Profile 1', ...]."""
+    chrome_dir = _chrome_profiles_dir()
+    if not chrome_dir or not os.path.isdir(chrome_dir):
+        return ["Default"]
+    profiles = []
+    for entry in sorted(os.listdir(chrome_dir)):
+        if entry == "Default" or entry.startswith("Profile "):
+            full = os.path.join(chrome_dir, entry)
+            cookies_db = os.path.join(full, "Cookies")
+            cookies_db_alt = os.path.join(full, "Network", "Cookies")
+            if os.path.isfile(cookies_db) or os.path.isfile(cookies_db_alt):
+                profiles.append(entry)
+    # Default should always be first
+    if "Default" in profiles:
+        profiles.remove("Default")
+        profiles.insert(0, "Default")
+    return profiles or ["Default"]
+
+
+def _load_profile_cache():
+    try:
+        with open(_PROFILE_CACHE_PATH) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_profile_cache(cache):
+    try:
+        os.makedirs(os.path.dirname(_PROFILE_CACHE_PATH), exist_ok=True)
+        with open(_PROFILE_CACHE_PATH, "w") as f:
+            json.dump(cache, f)
+    except OSError:
+        pass
+
+
+def _channel_id_from_url(url):
+    """Best-effort channel identifier from a video URL (used as cache key)."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        # Use just the path + video ID as the cache key — different videos
+        # from the same channel typically share a profile that works.
+        return parsed.path + "?" + urllib.parse.parse_qs(parsed.query).get("v", [""])[0]
+    except Exception:
+        return url
+
+
+def _probe_profile(ytdlp, url, profile):
+    """Quick simulate-only probe: does this profile's cookies let yt-dlp
+    extract this video's manifest without a members-only error? Returns
+    True/False. Bounded to ~15s."""
+    try:
+        result = subprocess.run(
+            [
+                ytdlp,
+                "--cookies-from-browser", f"chrome:{profile}",
+                "--extractor-args", "youtube:player_client=web",
+                "--no-playlist",
+                "--simulate",
+                "--quiet",
+                "--no-warnings",
+                "-f", "ba",
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            return True
+        # Look for members-only / auth errors in stderr
+        err = (result.stderr + result.stdout).lower()
+        if "join this channel" in err or "members-only" in err or "403" in err:
+            return False
+        # Other errors (format not available, network) — treat as inconclusive
+        # but DON'T pick this profile, try the next.
+        return False
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def detect_chrome_profile(ytdlp, url):
+    """
+    Find a Chrome profile whose cookies authenticate to this URL. Returns the
+    profile name (e.g. "Default", "Profile 3"). Caches per channel-key so we
+    only probe once per channel.
+    """
+    cache = _load_profile_cache()
+    key = _channel_id_from_url(url)
+
+    # Use cached result if it's recent (< 7 days).
+    cached = cache.get(key)
+    import time as _time
+    now = _time.time()
+    if cached and (now - cached.get("ts", 0)) < 7 * 86400:
+        log(f"Using cached profile for {key}: {cached['profile']}")
+        return cached["profile"]
+
+    profiles = _list_chrome_profiles()
+    log(f"Probing {len(profiles)} Chrome profiles for working cookies: {profiles}")
+
+    for profile in profiles:
+        log(f"  trying profile: {profile}")
+        if _probe_profile(ytdlp, url, profile):
+            log(f"  ✓ profile {profile!r} works — caching")
+            cache[key] = {"profile": profile, "ts": now}
+            _save_profile_cache(cache)
+            return profile
+
+    log(f"  no profile worked; falling back to Default")
+    return "Default"
+
+
 def find_ytdlp():
     """
     Locate the yt-dlp binary. Looks in PATH first (which is set by the
@@ -758,9 +897,17 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
     # -S (sort) makes sure the highest-bitrate stream wins among the ones
     # that match -f — without it yt-dlp can pick a low-bitrate AV1 over a
     # higher-bitrate VP9 at the same resolution.
+    # Auto-detect which Chrome profile has cookies that actually authenticate
+    # for this URL. The user may have 10+ profiles; only one (or two) hold
+    # the channel-membership cookies. Without this, we'd default to
+    # "Default" profile and YouTube returns "Join this channel" even when
+    # the user IS a paying member through a different profile.
+    chrome_profile = detect_chrome_profile(ytdlp, url)
+    cookies_arg = f"chrome:{chrome_profile}"
+
     cmd = [
         ytdlp,
-        "--cookies-from-browser", "chrome",
+        "--cookies-from-browser", cookies_arg,
         # CRITICAL: --print (used below for [selected] logging) IMPLIES
         # --quiet AND --simulate by default. Without --no-simulate, yt-dlp
         # would resolve metadata, exit 0, and download nothing — making
