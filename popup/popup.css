@@ -175,7 +175,8 @@ h2 {
   min-width: 0;
 }
 
-.quality-select {
+.quality-select,
+.save-location-select {
   flex: 1 1 180px;
   padding: 9px 10px;
   border: 1px solid #cbd5e1;
@@ -186,6 +187,11 @@ h2 {
   font-weight: 600;
   cursor: pointer;
   min-width: 0;
+  width: 100%;
+}
+
+.save-location-select {
+  margin-top: 2px;
 }
 
 .open-tab-btn {

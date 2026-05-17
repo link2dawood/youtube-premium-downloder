@@ -71,6 +71,8 @@ def _platform_default_download_dirs():
     candidates = [
         os.path.join(home, "Downloads"),
         os.path.join(home, "Videos"),
+        os.path.join(home, "Desktop"),
+        os.path.join(home, "Documents"),
     ]
     if IS_MAC:
         candidates.append(os.path.join(home, "Movies"))
@@ -90,6 +92,27 @@ def _platform_default_download_dirs():
             seen.add(p)
             out.append(p)
     return tuple(out)
+
+
+def _platform_save_locations():
+    """
+    Map of UI symbolic name -> absolute path for the popup's "Save to"
+    dropdown. The popup sends the symbol; the helper resolves it here, so
+    the path itself never crosses the messaging boundary (no chance of the
+    popup smuggling a path the user didn't intend).
+    """
+    home = os.path.expanduser("~")
+    mapping = {
+        "downloads": os.path.join(home, "Downloads"),
+        "videos":    os.path.join(home, "Videos"),
+        "desktop":   os.path.join(home, "Desktop"),
+        "documents": os.path.join(home, "Documents"),
+    }
+    if IS_MAC:
+        # On macOS the iMovie/QuickTime/Photos default video bucket is Movies,
+        # not Videos. Expose both — UI shows whichever exists.
+        mapping["movies"] = os.path.join(home, "Movies")
+    return mapping
 
 
 # ---------- Logging ----------
@@ -209,6 +232,9 @@ ALLOWED_DOWNLOAD_DIRS = _platform_default_download_dirs() or (
 )
 DEFAULT_DOWNLOAD_DIR = ALLOWED_DOWNLOAD_DIRS[0]
 
+# Map of UI symbol -> path. Populated per-platform.
+SAVE_LOCATIONS = _platform_save_locations()
+
 
 # ---------- Native messaging frames ----------
 
@@ -297,24 +323,47 @@ def validate_and_normalize_message(msg):
         raise ValidationError(f"Unknown format {format_key!r}. Allowed: {allowed}.")
     format_string, sort_string = FORMAT_PRESETS[format_key]
 
-    # Download path
+    # Download path: prefer the symbolic `saveLocation` (popup's "Save to"
+    # dropdown). Fall back to the raw `downloadPath` for back-compat / when
+    # the user types a custom path. Both are validated.
+    save_location = msg.get("saveLocation", "")
     raw_path = msg.get("downloadPath", "")
+    if not isinstance(save_location, str):
+        raise ValidationError("saveLocation must be a string.")
     if not isinstance(raw_path, str):
         raise ValidationError("downloadPath must be a string.")
+    save_location = save_location.strip().lower()
     raw_path = raw_path.strip()
-    if not raw_path:
-        download_path = DEFAULT_DOWNLOAD_DIR
-    else:
+
+    if save_location:
+        if save_location not in SAVE_LOCATIONS:
+            allowed = ", ".join(sorted(SAVE_LOCATIONS))
+            raise ValidationError(
+                f"Unknown saveLocation {save_location!r}. Allowed: {allowed}."
+            )
+        target = SAVE_LOCATIONS[save_location]
+        try:
+            os.makedirs(target, exist_ok=True)
+        except OSError as exc:
+            raise ValidationError(
+                f"Could not create save location {target!r}: {exc}"
+            ) from exc
+        download_path = os.path.realpath(target)
+    elif raw_path:
         expanded = os.path.expanduser(raw_path)
         if not os.path.isabs(expanded):
             raise ValidationError("downloadPath must be absolute or start with ~.")
         if not _is_path_inside(expanded, ALLOWED_DOWNLOAD_DIRS):
+            allowed = ", ".join(ALLOWED_DOWNLOAD_DIRS)
             raise ValidationError(
-                f"downloadPath {raw_path!r} is not inside an allowed directory."
+                f"downloadPath {raw_path!r} is not inside an allowed directory. "
+                f"Allowed roots: {allowed}."
             )
         if not os.path.isdir(expanded):
             raise ValidationError(f"downloadPath does not exist: {raw_path!r}")
         download_path = os.path.realpath(expanded)
+    else:
+        download_path = DEFAULT_DOWNLOAD_DIR
 
     return url, format_string, sort_string, download_path, format_key
 

@@ -46,6 +46,7 @@ function makeJob(opts) {
     url: opts.url,
     format: opts.format,
     formatLabel: opts.formatLabel || opts.format,
+    saveLocation: opts.saveLocation || "",
     state: "starting",   // starting | running | done | error | canceled
     percent: 0,
     speed: "",
@@ -136,11 +137,13 @@ function startDownload(opts) {
   port.onDisconnect.addListener(() => onJobDisconnect(job.id));
 
   try {
-    port.postMessage({
+    const payload = {
       action: "download",
       url: opts.url,
       format: opts.format,
-    });
+    };
+    if (opts.saveLocation) payload.saveLocation = opts.saveLocation;
+    port.postMessage(payload);
   } catch (err) {
     job.state = "error";
     job.error = friendlyHostError(err?.message || String(err));
@@ -386,6 +389,7 @@ async function routeMessage(msg, sendResponse) {
           url: msg.url,
           format: msg.format,
           formatLabel: msg.formatLabel,
+          saveLocation: msg.saveLocation,
         });
         return sendResponse({ ok: true, jobId: job.id, job: serializeJob(job) });
       }

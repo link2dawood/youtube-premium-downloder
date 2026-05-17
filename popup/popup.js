@@ -14,6 +14,7 @@ import { storage } from "../src/lib/storage.js";
 const STORAGE_KEYS = {
   recentYouTubeLinks: "recentYouTubeLinks",
   signInConfirmed: "signInConfirmedAt",
+  preferredSaveLocation: "preferredSaveLocation",
 };
 
 const HELPER_REPO = "link2dawood/youtube-premium-downloder";
@@ -38,6 +39,8 @@ const YOUTUBE_HOSTS = new Set([
 ]);
 
 const ALLOWED_FORMATS = new Set(["best", "4k", "2k", "1080p", "720p", "480p", "audio"]);
+const ALLOWED_SAVE_LOCATIONS = new Set(["downloads", "movies", "videos", "desktop", "documents"]);
+const DEFAULT_SAVE_LOCATION = "downloads";
 const FORMAT_LABELS = {
   best: "Best available",
   "4k": "4K (2160p)",
@@ -59,6 +62,7 @@ const els = {
   lastVideo: document.querySelector("#last-video"),
   youtubeForm: document.querySelector("#youtube-form"),
   youtubeUrlInput: document.querySelector("#youtube-url-input"),
+  saveLocationSelect: document.querySelector("#save-location-select"),
   signinBanner: document.querySelector("#signin-banner"),
   openYouTubeButton: document.querySelector("#open-youtube-button"),
   confirmSigninButton: document.querySelector("#confirm-signin-button"),
@@ -120,6 +124,28 @@ function validateFormat(value) {
   const f = String(value || "").trim().toLowerCase();
   if (!ALLOWED_FORMATS.has(f)) throw new Error(`Unsupported quality "${value}".`);
   return f;
+}
+
+function validateSaveLocation(value) {
+  const v = String(value || "").trim().toLowerCase();
+  if (!v) return DEFAULT_SAVE_LOCATION;
+  if (!ALLOWED_SAVE_LOCATIONS.has(v)) throw new Error(`Unknown save location "${value}".`);
+  return v;
+}
+
+// --- Persisted save-location preference ---
+
+async function loadSavedSaveLocation() {
+  const saved = await storage.get(STORAGE_KEYS.preferredSaveLocation, DEFAULT_SAVE_LOCATION);
+  if (ALLOWED_SAVE_LOCATIONS.has(saved)) {
+    els.saveLocationSelect.value = saved;
+  }
+}
+
+async function persistSaveLocation(value) {
+  if (ALLOWED_SAVE_LOCATIONS.has(value)) {
+    await storage.set(STORAGE_KEYS.preferredSaveLocation, value);
+  }
 }
 
 // --- Setup panel (helper detection) ---
@@ -458,10 +484,11 @@ chrome.runtime.onMessage.addListener((msg) => {
 // --- Start a download (worker does the actual work) ---
 
 function handleYouTubeDownload() {
-  let normalized, format;
+  let normalized, format, saveLocation;
   try {
     normalized = validateAndNormalizeYouTubeUrl(els.youtubeUrlInput.value);
     format = validateFormat(els.qualitySelect.value);
+    saveLocation = validateSaveLocation(els.saveLocationSelect.value);
   } catch (error) {
     // One-shot inline error card for invalid input.
     const fakeJob = {
@@ -478,12 +505,18 @@ function handleYouTubeDownload() {
     return;
   }
 
+  // Remember the user's last save location across sessions.
+  persistSaveLocation(saveLocation).catch((err) =>
+    console.error("Failed to persist save location", err)
+  );
+
   chrome.runtime.sendMessage(
     {
       type: "start-download",
       url: normalized.url,
       format,
       formatLabel: FORMAT_LABELS[format] || format,
+      saveLocation,
     },
     (response) => {
       void chrome.runtime.lastError;
@@ -559,10 +592,18 @@ els.setupRecheckButton.addEventListener("click", () => {
 });
 els.setupHelpButton.addEventListener("click", () => chrome.tabs.create({ url: HELPER_HELP_URL }));
 
+// Save location: remember the user's last pick across sessions.
+els.saveLocationSelect.addEventListener("change", () => {
+  persistSaveLocation(els.saveLocationSelect.value).catch((err) =>
+    console.error("Failed to persist save location", err)
+  );
+});
+
 // --- Init ---
 
 refreshRecentLinks().catch(console.error);
 refreshSignInBanner().catch(console.error);
+loadSavedSaveLocation().catch(console.error);
 hydrateJobsFromWorker().catch(console.error);
 
 els.setupPanel.classList.add("hidden");
