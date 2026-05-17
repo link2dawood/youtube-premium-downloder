@@ -18,31 +18,30 @@ URL="${1:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}"
 PRESET="${2:-4k}"
 
 # Format presets — kept in sync with FORMAT_PRESETS in native/downloader.py.
-# 1080p / 720p / 480p strongly prefer AVC + AAC so output is always a clean mp4.
-# 2K / 4K accept VP9 / AV1 (YouTube doesn't serve AVC above 1080p) and use the
-# runner's --merge-output-format mp4/mkv fallback. `lang` appears in every
-# sort key so multi-track videos pick the English audio.
+# Audio filter [language^=en] forces English audio for multi-track videos,
+# with two safe fallbacks: untagged audio (single-language videos) and any
+# audio (videos that simply don't have an English track).
 case "$PRESET" in
     best)
-        FMT="bv*+ba/best"
+        FMT="bv*+ba[language^=en]/bv*+ba[language=]/bv*+ba/best"
         SORT="res,tbr,fps,vcodec:av01,acodec:opus,lang,channels" ;;
     4k)
-        FMT="bv*[height<=2160]+ba/best[height<=2160]"
+        FMT="bv*[height<=2160]+ba[language^=en]/bv*[height<=2160]+ba[language=]/bv*[height<=2160]+ba/best[height<=2160]"
         SORT="res:2160,tbr,fps,vcodec:av01,acodec:opus,lang" ;;
     2k)
-        FMT="bv*[height<=1440]+ba/best[height<=1440]"
+        FMT="bv*[height<=1440]+ba[language^=en]/bv*[height<=1440]+ba[language=]/bv*[height<=1440]+ba/best[height<=1440]"
         SORT="res:1440,tbr,fps,vcodec:av01,acodec:opus,lang" ;;
     1080p)
-        FMT="bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]"
+        FMT="bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language=]/bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]"
         SORT="res:1080,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
     720p)
-        FMT="bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"
+        FMT="bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language=]/bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"
         SORT="res:720,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
     480p)
-        FMT="bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]"
+        FMT="bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language=]/bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]"
         SORT="res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
     audio)
-        FMT="ba[ext=m4a]/ba/best"
+        FMT="ba[ext=m4a][language^=en]/ba[language^=en]/ba[ext=m4a]/ba/best"
         SORT="abr,acodec:m4a:opus,lang" ;;
     *)
         echo "Unknown preset: $PRESET" >&2; exit 1 ;;
@@ -81,15 +80,24 @@ echo
 echo "================================================================"
 echo "yt-dlp exit code: $EXIT_CODE"
 echo
-echo "=== Files in ~/Downloads modified during this run ==="
-find "$DOWNLOADS" -maxdepth 1 -type f -newer "$MARK_FILE" -print0 \
-    | xargs -0 -I{} ls -lh "{}" 2>/dev/null
+echo "=== 5 most recent files in ~/Downloads ==="
+ls -lht "$DOWNLOADS" 2>/dev/null | head -6
+
+echo
+echo "=== Files modified during this run (newer than $MARK_FILE) ==="
+find "$DOWNLOADS" -maxdepth 1 -type f -newer "$MARK_FILE" 2>/dev/null \
+    | while IFS= read -r f; do ls -lh "$f"; done
 
 echo
 echo "=== ffprobe says (so you can verify actual resolution): ==="
-LAST_FILE=$(find "$DOWNLOADS" -maxdepth 1 -type f -newer "$MARK_FILE" \
+# Try the "newer than mark" approach first; if that finds nothing (sudo env
+# can desync mtimes), fall back to the single newest video file in ~/Downloads.
+LAST_FILE=$(find "$DOWNLOADS" -maxdepth 1 -type f -newer "$MARK_FILE" 2>/dev/null \
     \( -name "*.mp4" -o -name "*.mkv" -o -name "*.webm" -o -name "*.m4a" \) \
     | head -1)
+if [ -z "$LAST_FILE" ]; then
+    LAST_FILE=$(ls -t "$DOWNLOADS"/*.{mp4,mkv,webm,m4a} 2>/dev/null | head -1)
+fi
 if [ -n "$LAST_FILE" ] && [ -x "$INSTALL_DIR/ffprobe" ]; then
     "$INSTALL_DIR/ffprobe" -v error -select_streams v:0 \
         -show_entries stream=width,height,codec_name,bit_rate \
