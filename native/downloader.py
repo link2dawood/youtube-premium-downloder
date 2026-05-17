@@ -159,13 +159,37 @@ YOUTUBE_HOSTS = {
 #     string itself doesn't change — yt-dlp will simply have access to higher
 #     bitrate streams when the cookies grant membership.
 FORMAT_PRESETS = {
+    # "best" / 2K / 4K — let yt-dlp pick the highest-quality stream.
+    # YouTube only serves AVC up to 1080p, so anything ≥1440p means VP9 or
+    # AV1, which won't fit in mp4. The runner uses --merge-output-format
+    # mp4/mkv so the output is mp4 when codecs allow, mkv when they don't.
     "best":  ("bv*+ba/best",                                "res,tbr,fps,vcodec:av01,acodec:opus,channels"),
     "4k":    ("bv*[height<=2160]+ba/best[height<=2160]",    "res:2160,tbr,fps,vcodec:av01,acodec:opus"),
     "2k":    ("bv*[height<=1440]+ba/best[height<=1440]",    "res:1440,tbr,fps,vcodec:av01,acodec:opus"),
-    "1080p": ("bv*[height<=1080]+ba/best[height<=1080]",    "res:1080,tbr,fps,vcodec:vp09,acodec:opus"),
-    "720p":  ("bv*[height<=720]+ba/best[height<=720]",      "res:720,tbr,fps"),
-    "480p":  ("bv*[height<=480]+ba/best[height<=480]",      "res:480,tbr,fps"),
-    "audio": ("ba[ext=m4a]/ba/best",                        "abr,acodec:opus"),
+
+    # 1080p / 720p / 480p — prefer AVC (H.264) video + AAC (m4a) audio so
+    # the output is always a clean .mp4 file that plays everywhere without
+    # remux. Format string narrows to the AVC+m4a combo first, then falls
+    # back to any mp4 stream, then anything. Sort criteria pin AVC + m4a as
+    # the preference among equal-resolution streams.
+    "1080p": (
+        "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
+        "best[height<=1080][ext=mp4]/best[height<=1080]",
+        "res:1080,tbr,fps,vcodec:avc1,acodec:m4a",
+    ),
+    "720p": (
+        "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
+        "best[height<=720][ext=mp4]/best[height<=720]",
+        "res:720,tbr,fps,vcodec:avc1,acodec:m4a",
+    ),
+    "480p": (
+        "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
+        "best[height<=480][ext=mp4]/best[height<=480]",
+        "res:480,tbr,fps,vcodec:avc1,acodec:m4a",
+    ),
+
+    # Audio-only — m4a (AAC) preferred so it plays in everything.
+    "audio": ("ba[ext=m4a]/ba/best",                        "abr,acodec:m4a:opus"),
 }
 
 # Quality keys that download audio-only. The runner skips video merge args
