@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#
+# List every audio track yt-dlp can see for a given video, with its language
+# tag. Use this to confirm whether the "I want English audio" issue is:
+#   (a) the video has no English track at all (no fix in PixelCatch will help)
+#   (b) the video has English BUT the language is tagged differently
+#       (e.g. "en-US" not "en", or empty/null) and our filter misses it
+#   (c) the video has English tagged "en" and our format selector works
+#
+# Usage:
+#   bash tools/list-audio-tracks "<video URL>"
+
+set +e
+
+INSTALL_DIR="/Library/Application Support/PixelCatch"
+URL="${1:?Usage: bash tools/list-audio-tracks <video-url>}"
+
+if [ ! -x "$INSTALL_DIR/yt-dlp" ]; then
+    echo "yt-dlp not found at $INSTALL_DIR/yt-dlp" >&2
+    exit 1
+fi
+
+echo "================================================================"
+echo "Audio tracks for: $URL"
+echo "================================================================"
+echo
+
+# --print format with language field, one line per audio-only format. This
+# is the ground truth — every audio track yt-dlp can see, with whatever
+# language tag YouTube gave it.
+"$INSTALL_DIR/yt-dlp" \
+    --cookies-from-browser chrome \
+    --extractor-args "youtube:player_client=tv,web,web_safari,mweb;lang=en" \
+    --no-playlist \
+    --skip-download \
+    --print "%(formats.:.format_id)s|%(formats.:.language)s|%(formats.:.format_note)s|%(formats.:.acodec)s|%(formats.:.abr)s" \
+    "$URL" 2>&1 | head -20
+
+echo
+echo "================================================================"
+echo "Just the audio-only formats:"
+echo "================================================================"
+"$INSTALL_DIR/yt-dlp" \
+    --cookies-from-browser chrome \
+    --extractor-args "youtube:player_client=tv,web,web_safari,mweb;lang=en" \
+    --no-playlist \
+    --skip-download \
+    -F \
+    "$URL" 2>&1 | grep -E "^[a-z0-9-]+ +(m4a|webm|mp4)? +audio only" | head -30
+
+echo
+echo "================================================================"
+echo "Trying each language-filter strategy in order:"
+echo "================================================================"
+
+for SELECTOR in \
+    "bv*+ba[language^=en]" \
+    "bv*+ba[language=en]" \
+    "bv*+ba[language~='^en']" \
+    "bv*+ba[language~='^(en|eng)']" \
+    "bv*+ba"
+do
+    out=$("$INSTALL_DIR/yt-dlp" \
+        --cookies-from-browser chrome \
+        --extractor-args "youtube:player_client=tv,web,web_safari,mweb;lang=en" \
+        --no-playlist \
+        --simulate \
+        --quiet --no-warnings \
+        -f "$SELECTOR" \
+        --print "%(format_id)s lang=%(language)s acodec=%(acodec)s" \
+        "$URL" 2>&1 | tail -1)
+    printf "  %-40s -> %s\n" "$SELECTOR" "$out"
+done
+
+echo
+echo "================================================================"
+echo "Interpretation guide:"
+echo "  - If all 5 selectors return lang=None (or empty), the video has NO"
+echo "    language metadata on its audio tracks — yt-dlp can't filter by"
+echo "    language. (Workaround: pick the audio format ID manually.)"
+echo "  - If some return lang=en and others return lang=uk/es/whatever,"
+echo "    use the SELECTOR pattern that returned lang=en in production."
+echo "  - If only lang=uk (or another non-English) appears, the video"
+echo "    genuinely doesn't have an English audio track."
+echo "================================================================"
