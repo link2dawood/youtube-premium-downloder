@@ -188,21 +188,31 @@ YOUTUBE_HOSTS = {
 # channel membership while a lower-quality (or different-codec) version is
 # publicly available — yt-dlp's manifest-time `/` fallback doesn't help
 # because it picks on EXISTENCE, not on DOWNLOAD-ABILITY.
+#
+# IMPORTANT ORDERING RULE: exhaust ALL English-audio attempts (at every
+# resolution) BEFORE accepting non-English audio. For many multi-language
+# videos the English audio is gated to channel members but lower-quality
+# English (or English at lower resolution) is public — we want that over
+# a Spanish/Hindi/Ukrainian dub at the user's preferred resolution.
 FORMAT_PRESETS = {
     # "best" / 2K / 4K — let yt-dlp pick the highest-quality stream.
     "best": (
         [
-            "bv*+ba[language~='^(en|eng)']",
-            "bv*+ba",
+            "bv*+ba[language~='^(en|eng)']",  # English-preferred
+            "bv*+ba",                          # any language
             "best",
         ],
         "res,tbr,fps,vcodec:av01,acodec:opus,lang,channels",
     ),
     "4k": (
         [
+            # === English-required phase (drop quality before language) ===
             "bv*[height<=2160]+ba[language~='^(en|eng)']",
-            "bv*[height<=2160]+ba",
+            "bv*[height<=1440]+ba[language~='^(en|eng)']",
+            "bv*[height<=1080]+ba[language~='^(en|eng)']",
             "bv*+ba[language~='^(en|eng)']",
+            # === Accept any language (last resort) ===
+            "bv*[height<=2160]+ba",
             "bv*+ba",
             "best",
         ],
@@ -210,24 +220,30 @@ FORMAT_PRESETS = {
     ),
     "2k": (
         [
+            # English-required phase
             "bv*[height<=1440]+ba[language~='^(en|eng)']",
-            "bv*[height<=1440]+ba",
+            "bv*[height<=1080]+ba[language~='^(en|eng)']",
             "bv*+ba[language~='^(en|eng)']",
+            # Any language
+            "bv*[height<=1440]+ba",
             "bv*+ba",
             "best",
         ],
         "res:1440,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
     # 1080p / 720p / 480p — prefer AVC (H.264) video + AAC (m4a) audio in
-    # English (clean .mp4 output). On member-gate errors, drop the AVC and
-    # m4a constraints in turn, finally dropping resolution.
+    # English (clean .mp4 output). Exhaust English options at every
+    # resolution before falling back to non-English.
     "1080p": (
         [
+            # === English-required phase ===
             "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
             "bv*[height<=1080]+ba[language~='^(en|eng)']",
+            "bv*[height<=720]+ba[language~='^(en|eng)']",
+            "bv*+ba[language~='^(en|eng)']",
+            # === Any language (last resort) ===
             "bv*[height<=1080]+ba",
             "best[height<=1080]",
-            "bv*+ba[language~='^(en|eng)']",
             "bv*+ba",
             "best",
         ],
@@ -235,11 +251,14 @@ FORMAT_PRESETS = {
     ),
     "720p": (
         [
+            # English-required phase
             "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
             "bv*[height<=720]+ba[language~='^(en|eng)']",
+            "bv*[height<=480]+ba[language~='^(en|eng)']",
+            "bv*+ba[language~='^(en|eng)']",
+            # Any language
             "bv*[height<=720]+ba",
             "best[height<=720]",
-            "bv*+ba[language~='^(en|eng)']",
             "bv*+ba",
             "best",
         ],
@@ -247,11 +266,13 @@ FORMAT_PRESETS = {
     ),
     "480p": (
         [
+            # English-required phase
             "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
             "bv*[height<=480]+ba[language~='^(en|eng)']",
+            "bv*+ba[language~='^(en|eng)']",
+            # Any language
             "bv*[height<=480]+ba",
             "best[height<=480]",
-            "bv*+ba[language~='^(en|eng)']",
             "bv*+ba",
             "best",
         ],
