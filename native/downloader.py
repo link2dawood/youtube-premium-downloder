@@ -194,16 +194,16 @@ FORMAT_PRESETS = {
     #   3. any combined stream at this resolution (last-resort fallback)
     # The -S "lang" key adds a soft preference among equally-valid candidates.
     "best": (
-        "bv*+ba[language^=en]/bv*+ba/best",
+        "bv*+ba[language~='^(en|eng)']/bv*+ba/best",
         "res,tbr,fps,vcodec:av01,acodec:opus,lang,channels",
     ),
     "4k": (
-        "bv*[height<=2160]+ba[language^=en]/"
+        "bv*[height<=2160]+ba[language~='^(en|eng)']/"
         "bv*[height<=2160]+ba/best[height<=2160]",
         "res:2160,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
     "2k": (
-        "bv*[height<=1440]+ba[language^=en]/"
+        "bv*[height<=1440]+ba[language~='^(en|eng)']/"
         "bv*[height<=1440]+ba/best[height<=1440]",
         "res:1440,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
@@ -211,19 +211,19 @@ FORMAT_PRESETS = {
     # 1080p / 720p / 480p — prefer AVC (H.264) video + AAC (m4a) audio in
     # English so the output is always a clean .mp4 file in your language.
     "1080p": (
-        "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/"
+        "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/"
         "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
         "best[height<=1080][ext=mp4]/best[height<=1080]",
         "res:1080,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
     "720p": (
-        "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/"
+        "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/"
         "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
         "best[height<=720][ext=mp4]/best[height<=720]",
         "res:720,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
     "480p": (
-        "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/"
+        "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/"
         "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/"
         "best[height<=480][ext=mp4]/best[height<=480]",
         "res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang",
@@ -231,7 +231,7 @@ FORMAT_PRESETS = {
 
     # Audio-only — m4a (AAC) preferred so it plays in everything.
     "audio": (
-        "ba[ext=m4a][language^=en]/ba[language^=en]/ba[ext=m4a]/ba/best",
+        "ba[ext=m4a][language~='^(en|eng)']/ba[language~='^(en|eng)']/ba[ext=m4a]/ba/best",
         "abr,acodec:m4a:opus,lang",
     ),
 }

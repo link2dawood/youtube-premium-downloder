@@ -18,29 +18,29 @@ URL="${1:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}"
 PRESET="${2:-4k}"
 
 # Format presets — kept in sync with FORMAT_PRESETS in native/downloader.py.
-# Audio filter [language^=en] forces English audio for multi-track videos,
+# Audio filter [language~='^(en|eng)'] forces English audio for multi-track videos,
 # with a fallback to any audio when no English track exists.
 case "$PRESET" in
     best)
-        FMT="bv*+ba[language^=en]/bv*+ba/best"
+        FMT="bv*+ba[language~='^(en|eng)']/bv*+ba/best"
         SORT="res,tbr,fps,vcodec:av01,acodec:opus,lang,channels" ;;
     4k)
-        FMT="bv*[height<=2160]+ba[language^=en]/bv*[height<=2160]+ba/best[height<=2160]"
+        FMT="bv*[height<=2160]+ba[language~='^(en|eng)']/bv*[height<=2160]+ba/best[height<=2160]"
         SORT="res:2160,tbr,fps,vcodec:av01,acodec:opus,lang" ;;
     2k)
-        FMT="bv*[height<=1440]+ba[language^=en]/bv*[height<=1440]+ba/best[height<=1440]"
+        FMT="bv*[height<=1440]+ba[language~='^(en|eng)']/bv*[height<=1440]+ba/best[height<=1440]"
         SORT="res:1440,tbr,fps,vcodec:av01,acodec:opus,lang" ;;
     1080p)
-        FMT="bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]"
+        FMT="bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]"
         SORT="res:1080,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
     720p)
-        FMT="bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"
+        FMT="bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"
         SORT="res:720,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
     480p)
-        FMT="bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language^=en]/bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]"
+        FMT="bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']/bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]"
         SORT="res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang" ;;
     audio)
-        FMT="ba[ext=m4a][language^=en]/ba[language^=en]/ba[ext=m4a]/ba/best"
+        FMT="ba[ext=m4a][language~='^(en|eng)']/ba[language~='^(en|eng)']/ba[ext=m4a]/ba/best"
         SORT="abr,acodec:m4a:opus,lang" ;;
     *)
         echo "Unknown preset: $PRESET" >&2; exit 1 ;;
