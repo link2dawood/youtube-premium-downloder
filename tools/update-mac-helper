@@ -49,3 +49,30 @@ else
     echo "Maybe the repo's downloader.py is also stale — check git status." >&2
     exit 1
 fi
+
+# Bootstrap ffmpeg + ffprobe if they're missing from the install dir.
+# Older .pkg builds (before bundling was added) installed only downloader.py
+# and yt-dlp; without ffmpeg, 4K downloads that need video+audio merging
+# fail silently. We pull from evermeet.cx (signed universal macOS binaries).
+for tool in ffmpeg ffprobe; do
+    if [ -x "$DEST_DIR/$tool" ]; then
+        continue
+    fi
+    echo "Bootstrapping missing $tool from evermeet.cx..."
+    tmp_zip=$(mktemp)
+    url="https://evermeet.cx/ffmpeg/getrelease/$tool/zip"
+    if curl -fL --retry 3 -o "$tmp_zip" "$url"; then
+        # Extract just the binary into the install dir.
+        unzip -p "$tmp_zip" "$tool" > "$DEST_DIR/$tool"
+        chmod 755 "$DEST_DIR/$tool"
+        echo "  installed: $DEST_DIR/$tool"
+    else
+        echo "  warning: couldn't download $tool — 4K merges may fail." >&2
+    fi
+    rm -f "$tmp_zip"
+done
+xattr -dr com.apple.quarantine "$DEST_DIR" 2>/dev/null || true
+
+echo
+echo "Install dir contents:"
+ls -la "$DEST_DIR" 2>/dev/null | tail -n +2
