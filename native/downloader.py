@@ -271,8 +271,10 @@ FORMAT_PRESETS = {
 }
 
 # Substrings in yt-dlp's error output that mean "this specific format is
-# blocked but a different one might work" — triggers our chain fallback.
+# blocked or unavailable, but a different one might work" — triggers our
+# chain fallback to the next, broader selector.
 RETRYABLE_ERROR_PATTERNS = (
+    # Access-gated formats (membership / age / region / private).
     "join this channel",
     "members-only",
     "members only",
@@ -282,6 +284,16 @@ RETRYABLE_ERROR_PATTERNS = (
     "http error 401",
     "this video is private",
     "video unavailable",
+
+    # Selector-too-strict: yt-dlp couldn't find any format matching our
+    # filter. The most common case: we required English audio via
+    # [language^=en] but the video is single-language and has no language
+    # tag at all. Falling back to a selector without the language filter
+    # resolves it.
+    "requested format is not available",
+    "no video formats found",
+    "no audio formats found",
+    "no formats found",
 )
 
 
