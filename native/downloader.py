@@ -194,43 +194,29 @@ YOUTUBE_HOSTS = {
 # videos the English audio is gated to channel members but lower-quality
 # English (or English at lower resolution) is public — we want that over
 # a Spanish/Hindi/Ukrainian dub at the user's preferred resolution.
-# yt-dlp audio format ID conventions on YouTube:
-#   * "140", "251", "249", "250"  — ORIGINAL audio track for the video.
-#     For English-language channels this is the actual English you want.
-#   * "140-0", "140-1", "140-N"   — DUBBED audio tracks. Each -N is a
-#     language variant (English-US, Spanish, Hindi, Portuguese, etc.).
-#     Some of these are auto-generated synthetic dubs even when tagged "en".
+# Format chain strategy:
+#   1. Tier 1 — preferred quality + English-tagged audio (multi-lang videos)
+#   2. Tier 2 — preferred quality + any audio (single-lang videos, no lang tag)
+#   3. Tier 3 — any lower quality + any audio (last resort)
 #
-# Strategy: prefer ORIGINAL audio (no -N suffix → regex `^[0-9]+$` on
-# format_id) when the channel is producing the content in the user's
-# language. Only fall through to language-tagged dubs when no original
-# matches our other constraints.
-ORIGINAL_AUDIO_FILTER = "[format_id~='^[0-9]+$']"
-
+# Removed the format_id^[0-9]+$ "original audio" filter because it broke HLS
+# videos where ALL audio formats have -N suffix (no plain "140" exists, only
+# "140-N" variants). For DASH videos yt-dlp's natural sort still picks 140 as
+# original when our sort has acodec:m4a as a preference key.
 FORMAT_PRESETS = {
-    # "best" / 2K / 4K — let yt-dlp pick the highest-quality stream.
     "best": (
         [
-            f"bv*+ba{ORIGINAL_AUDIO_FILTER}",                         # original audio (most reliable)
-            "bv*+ba[language~='^(en|eng)']",                          # English-tagged variant
-            "bv*+ba",                                                  # any language
+            "bv*+ba[language~='^(en|eng)']",  # English-tagged
+            "bv*+ba",                          # any audio
             "best",
         ],
         "res,tbr,fps,vcodec:av01,acodec:opus,lang,channels",
     ),
     "4k": (
         [
-            # === Original-audio phase (prefers untagged English from English channels) ===
-            f"bv*[height<=2160]+ba{ORIGINAL_AUDIO_FILTER}",
-            f"bv*[height<=1440]+ba{ORIGINAL_AUDIO_FILTER}",
-            f"bv*[height<=1080]+ba{ORIGINAL_AUDIO_FILTER}",
-            # === English-tagged variants (multi-lang videos with dubs) ===
             "bv*[height<=2160]+ba[language~='^(en|eng)']",
-            "bv*[height<=1440]+ba[language~='^(en|eng)']",
-            "bv*[height<=1080]+ba[language~='^(en|eng)']",
-            "bv*+ba[language~='^(en|eng)']",
-            # === Any language (last resort) ===
             "bv*[height<=2160]+ba",
+            "bv*+ba[language~='^(en|eng)']",
             "bv*+ba",
             "best",
         ],
@@ -238,33 +224,22 @@ FORMAT_PRESETS = {
     ),
     "2k": (
         [
-            f"bv*[height<=1440]+ba{ORIGINAL_AUDIO_FILTER}",
-            f"bv*[height<=1080]+ba{ORIGINAL_AUDIO_FILTER}",
             "bv*[height<=1440]+ba[language~='^(en|eng)']",
-            "bv*[height<=1080]+ba[language~='^(en|eng)']",
-            "bv*+ba[language~='^(en|eng)']",
             "bv*[height<=1440]+ba",
+            "bv*+ba[language~='^(en|eng)']",
             "bv*+ba",
             "best",
         ],
         "res:1440,tbr,fps,vcodec:av01,acodec:opus,lang",
     ),
-    # 1080p / 720p / 480p — prefer AVC (H.264) video + AAC (m4a) audio.
-    # ORIGINAL audio (no -N suffix) is preferred over English-tagged dubs.
     "1080p": (
         [
-            # Tier 1: 1080p AVC mp4 + original AAC audio (the ideal mp4 download)
-            f"bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]{ORIGINAL_AUDIO_FILTER}",
-            f"bv*[height<=1080]+ba{ORIGINAL_AUDIO_FILTER}",
-            f"bv*[height<=720]+ba{ORIGINAL_AUDIO_FILTER}",
-            f"bv*+ba{ORIGINAL_AUDIO_FILTER}",
-            # Tier 2: English-tagged variants (only if no original matched)
             "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]",
             "bv*[height<=1080]+ba[language~='^(en|eng)']",
-            "bv*+ba[language~='^(en|eng)']",
-            # Tier 3: any language (last resort)
             "bv*[height<=1080]+ba",
             "best[height<=1080]",
+            "bv*+ba[language~='^(en|eng)']",
             "bv*+ba",
             "best",
         ],
@@ -272,12 +247,9 @@ FORMAT_PRESETS = {
     ),
     "720p": (
         [
-            f"bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]{ORIGINAL_AUDIO_FILTER}",
-            f"bv*[height<=720]+ba{ORIGINAL_AUDIO_FILTER}",
-            f"bv*+ba{ORIGINAL_AUDIO_FILTER}",
             "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]",
             "bv*[height<=720]+ba[language~='^(en|eng)']",
-            "bv*+ba[language~='^(en|eng)']",
             "bv*[height<=720]+ba",
             "best[height<=720]",
             "bv*+ba",
@@ -287,12 +259,8 @@ FORMAT_PRESETS = {
     ),
     "480p": (
         [
-            f"bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]{ORIGINAL_AUDIO_FILTER}",
-            f"bv*[height<=480]+ba{ORIGINAL_AUDIO_FILTER}",
-            f"bv*+ba{ORIGINAL_AUDIO_FILTER}",
             "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
-            "bv*[height<=480]+ba[language~='^(en|eng)']",
-            "bv*+ba[language~='^(en|eng)']",
+            "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]",
             "bv*[height<=480]+ba",
             "best[height<=480]",
             "bv*+ba",
@@ -300,11 +268,8 @@ FORMAT_PRESETS = {
         ],
         "res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang",
     ),
-    # Audio-only: original audio first, then English-tagged, then anything.
     "audio": (
         [
-            f"ba[ext=m4a]{ORIGINAL_AUDIO_FILTER}",
-            f"ba{ORIGINAL_AUDIO_FILTER}",
             "ba[ext=m4a][language~='^(en|eng)']",
             "ba[language~='^(en|eng)']",
             "ba[ext=m4a]",
@@ -605,12 +570,22 @@ def _probe_profile(ytdlp, url, profile):
         return False
 
 
+_PROFILE_PROBED_THIS_RUN = {}  # url -> profile, in-process cache
+
+
 def detect_chrome_profile(ytdlp, url):
     """
     Find a Chrome profile whose cookies authenticate to this URL. Returns the
     profile name (e.g. "Default", "Profile 3"). Caches per channel-key so we
     only probe once per channel.
+
+    Skips the probe entirely and returns "Default" if we already probed this
+    URL during the current process (so a multi-attempt format chain doesn't
+    re-probe N times).
     """
+    if url in _PROFILE_PROBED_THIS_RUN:
+        return _PROFILE_PROBED_THIS_RUN[url]
+
     cache = _load_profile_cache()
     key = _channel_id_from_url(url)
 
@@ -620,6 +595,7 @@ def detect_chrome_profile(ytdlp, url):
     now = _time.time()
     if cached and (now - cached.get("ts", 0)) < 7 * 86400:
         log(f"Using cached profile for {key}: {cached['profile']}")
+        _PROFILE_PROBED_THIS_RUN[url] = cached["profile"]
         return cached["profile"]
 
     profiles = _list_chrome_profiles()
@@ -631,9 +607,11 @@ def detect_chrome_profile(ytdlp, url):
             log(f"  ✓ profile {profile!r} works — caching")
             cache[key] = {"profile": profile, "ts": now}
             _save_profile_cache(cache)
+            _PROFILE_PROBED_THIS_RUN[url] = profile
             return profile
 
-    log(f"  no profile worked; falling back to Default")
+    log(f"  no profile worked; falling back to Default (probably tier-gated)")
+    _PROFILE_PROBED_THIS_RUN[url] = "Default"
     return "Default"
 
 
@@ -842,17 +820,34 @@ def run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key):
     error_msg = last_error or "Download failed after exhausting all format fallbacks."
 
     if _is_retryable_error(error_msg):
-        # Every fallback hit a members-only / 403 gate. Don't just echo the
-        # raw "Join this channel" — tell the user what to actually check.
-        error_msg = (
-            "This video is members-only. Every quality option we tried "
-            f"({len(fmt_chain)} attempts including 4K/1080p/720p/audio-only) "
-            "was blocked by YouTube. Either you're not a paying member of this "
-            "channel, or you're a member with a DIFFERENT Google account than "
-            "the one currently active in Chrome. Open the video URL in Chrome — "
-            "if it plays, switch accounts via the popup's Switch Account button. "
-            "If you see a 'Join channel' button instead, you'd need to actually join."
+        # Try to extract the exact tier name from YouTube's error so the user
+        # knows EXACTLY what membership level is needed. Examples of the raw
+        # error format:
+        #   "available to this channel's members on level: Full Interviews Early"
+        #   "available on level: Inner Circle (or any higher level)"
+        tier_match = re.search(
+            r"members?\s+on\s+level:\s*([^.\n]+?)(?:\s*\(or|\.|$)",
+            error_msg,
+            re.IGNORECASE,
         )
+        if tier_match:
+            tier = tier_match.group(1).strip().rstrip(".)")
+            error_msg = (
+                f"This video requires the '{tier}' membership tier "
+                f"(or higher). Your current membership doesn't include this "
+                f"tier, so YouTube blocks the download. To watch it: upgrade "
+                f"your channel membership to '{tier}' or above on YouTube."
+            )
+        else:
+            error_msg = (
+                "This video is members-only. Every quality option we tried "
+                f"({len(fmt_chain)} attempts including 4K/1080p/720p/audio-only) "
+                "was blocked by YouTube. Either you're not a paying member of this "
+                "channel, or you're a member with a DIFFERENT Google account than "
+                "the one currently active in Chrome. Open the video URL in Chrome — "
+                "if it plays, switch accounts via the popup's Switch Account button. "
+                "If you see a 'Join channel' button instead, you'd need to actually join."
+            )
 
     if IS_MAC and "exited with code 255" in error_msg.lower():
         error_msg += (
