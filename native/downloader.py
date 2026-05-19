@@ -206,7 +206,7 @@ YOUTUBE_HOSTS = {
 FORMAT_PRESETS = {
     "best": (
         [
-            "bv*+ba[language~='^(en|eng)']",  # English-tagged
+            "bv*+ba[language~='^(en|eng|und)']",  # English-tagged
             "bv*+ba",                          # any audio
             "best",
         ],
@@ -214,9 +214,9 @@ FORMAT_PRESETS = {
     ),
     "4k": (
         [
-            "bv*[height<=2160]+ba[language~='^(en|eng)']",
+            "bv*[height<=2160]+ba[language~='^(en|eng|und)']",
             "bv*[height<=2160]+ba",
-            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba[language~='^(en|eng|und)']",
             "bv*+ba",
             "best",
         ],
@@ -224,9 +224,9 @@ FORMAT_PRESETS = {
     ),
     "2k": (
         [
-            "bv*[height<=1440]+ba[language~='^(en|eng)']",
+            "bv*[height<=1440]+ba[language~='^(en|eng|und)']",
             "bv*[height<=1440]+ba",
-            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba[language~='^(en|eng|und)']",
             "bv*+ba",
             "best",
         ],
@@ -234,12 +234,12 @@ FORMAT_PRESETS = {
     ),
     "1080p": (
         [
-            "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng|und)']",
             "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]",
-            "bv*[height<=1080]+ba[language~='^(en|eng)']",
+            "bv*[height<=1080]+ba[language~='^(en|eng|und)']",
             "bv*[height<=1080]+ba",
             "best[height<=1080]",
-            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba[language~='^(en|eng|und)']",
             "bv*+ba",
             "best",
         ],
@@ -247,9 +247,9 @@ FORMAT_PRESETS = {
     ),
     "720p": (
         [
-            "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng|und)']",
             "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]",
-            "bv*[height<=720]+ba[language~='^(en|eng)']",
+            "bv*[height<=720]+ba[language~='^(en|eng|und)']",
             "bv*[height<=720]+ba",
             "best[height<=720]",
             "bv*+ba",
@@ -259,7 +259,7 @@ FORMAT_PRESETS = {
     ),
     "480p": (
         [
-            "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng|und)']",
             "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]",
             "bv*[height<=480]+ba",
             "best[height<=480]",
@@ -270,8 +270,8 @@ FORMAT_PRESETS = {
     ),
     "audio": (
         [
-            "ba[ext=m4a][language~='^(en|eng)']",
-            "ba[language~='^(en|eng)']",
+            "ba[ext=m4a][language~='^(en|eng|und)']",
+            "ba[language~='^(en|eng|und)']",
             "ba[ext=m4a]",
             "ba",
             "best",
@@ -928,12 +928,11 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
         "--progress",
         "--progress-template",
         f"{PROGRESS_PREFIX}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s",
-        # Removed the --print "[selected] ..." debug line. It implied --quiet
-        # AND --simulate, which silently broke downloads (no file written) and
-        # suppressed the "[download] file has already been downloaded" message
-        # we need to detect already-downloaded videos. yt-dlp's default
-        # output (which includes [download] Destination: lines) gives us
-        # everything we need.
+        # Log selected format AFTER download completes (after_video event
+        # doesn't trigger --simulate, unlike the default pre_process event).
+        # Lets us debug "wrong language/quality" complaints from the log
+        # without affecting the download itself.
+        "--print", "after_video:[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s lang=%(language)s",
         "-o", os.path.join(download_path, "%(title)s.%(ext)s"),
     ]
 
