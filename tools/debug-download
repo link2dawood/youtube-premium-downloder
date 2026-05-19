@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+#
+# PixelCatch comprehensive download debugger.
+#
+# Shows EVERYTHING about a video so we can diagnose audio/quality issues:
+#   1. Every audio format yt-dlp can see + its language tag + bitrate
+#   2. What each chain step in FORMAT_PRESETS would actually pick (simulated)
+#   3. Recommended selector for THIS specific video
+#   4. (Optional) real download + post-download ffprobe verification
+#
+# Usage:
+#   bash tools/debug-download <URL> [preset]              # diagnose only
+#   bash tools/debug-download <URL> [preset] --download   # also do the real download
+#
+# Preset defaults to 1080p.
+set +e
+
+INSTALL_DIR="/Library/Application Support/PixelCatch"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+URL="${1:?Usage: bash tools/debug-download <URL> [preset] [--download]}"
+PRESET="${2:-1080p}"
+DOWNLOAD="false"
+[ "${3:-}" = "--download" ] && DOWNLOAD="true"
+
+YTDLP="$INSTALL_DIR/yt-dlp"
+[ -x "$YTDLP" ] || { echo "Helper not installed at $INSTALL_DIR" >&2; exit 1; }
+
+SEP="================================================================"
+HDR() { echo; echo "$SEP"; echo "$1"; echo "$SEP"; }
+
+# Extract preset's fmt_chain and sort from downloader.py via a Python eval.
+read -r SORT < <(python3 -c "
+import sys; sys.path.insert(0, '$REPO_ROOT/native')
+from downloader import FORMAT_PRESETS
+chain, sort = FORMAT_PRESETS['$PRESET']
+print(sort)
+" 2>/dev/null)
+
+CHAIN_FILE=$(mktemp)
+python3 -c "
+import sys; sys.path.insert(0, '$REPO_ROOT/native')
+from downloader import FORMAT_PRESETS
+chain, _ = FORMAT_PRESETS['$PRESET']
+for s in chain: print(s)
+" > "$CHAIN_FILE"
+
+HDR "PixelCatch debug — $URL ($PRESET)"
+
+# ---------- 1. yt-dlp version ----------
+HDR "[1/5] yt-dlp version"
+"$YTDLP" --version
+
+# ---------- 2. Every audio format with language ----------
+HDR "[2/5] All available AUDIO formats (language tags!)"
+"$YTDLP" \
+    --cookies-from-browser chrome \
+    --extractor-args "youtube:player_client=tv,web,web_safari,mweb;lang=en" \
+    --no-playlist \
+    --skip-download \
+    --quiet --no-warnings \
+    --print "%(formats)j" \
+    "$URL" 2>&1 \
+    | python3 -c "
+import json, sys
+try:
+    line = sys.stdin.read().strip()
+    formats = json.loads(line)
+    audio = [f for f in formats if f.get('vcodec') == 'none' or f.get('audio_ext') == 'm4a' or f.get('audio_ext') == 'webm']
+    audio = [f for f in audio if f.get('format_id', '').lower() not in ('storyboards',)]
+    if not audio:
+        print('  (no audio formats found)')
+    else:
+        print(f'  {\"id\":12} {\"lang\":8} {\"codec\":12} {\"abr\":>6} {\"note\"}')
+        print('  ' + '-' * 76)
+        for f in audio[:40]:
+            fid   = f.get('format_id', '?')
+            lang  = f.get('language') or 'None'
+            codec = f.get('acodec', '?')[:12]
+            abr   = f.get('abr', '?')
+            note  = f.get('format_note') or ''
+            print(f'  {fid:12} {str(lang):8} {codec:12} {str(abr):>6} {note[:40]}')
+except Exception as e:
+    print(f'  could not parse formats: {e}')
+"
+
+# ---------- 3. What each chain step would pick ----------
+HDR "[3/5] What each FORMAT_PRESETS['$PRESET'] step would select"
+echo "  Sort: $SORT"
+echo
+i=0
+while IFS= read -r FMT; do
+    i=$((i+1))
+    out=$("$YTDLP" \
+        --cookies-from-browser chrome \
+        --extractor-args "youtube:player_client=tv,web,web_safari,mweb;lang=en" \
+        --no-playlist \
+        --simulate --quiet --no-warnings \
+        -f "$FMT" -S "$SORT" \
+        --print "[%(format_id)s] %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s lang=%(language)s" \
+        "$URL" 2>&1 | tail -1)
+
+    short_fmt="${FMT:0:60}"
+    [ "${#FMT}" -gt 60 ] && short_fmt="${short_fmt}..."
+    printf "  step %d: %s\n          -> %s\n" "$i" "$short_fmt" "$out"
+done < "$CHAIN_FILE"
+rm -f "$CHAIN_FILE"
+
+# ---------- 4. Helper's actual end-to-end attempt ----------
+if [ "$DOWNLOAD" = "true" ]; then
+    HDR "[4/5] Real download via helper (this may take a while)"
+    bash "$REPO_ROOT/tools/test-download" "$URL" "$PRESET"
+
+    HDR "[5/5] ffprobe audio language of resulting file"
+    LAST=$(ls -t "$HOME/Downloads"/*.mp4 "$HOME/Downloads"/*.mkv 2>/dev/null | head -1)
+    if [ -n "$LAST" ]; then
+        echo "  File: $LAST"
+        "$INSTALL_DIR/ffprobe" -v error -show_entries stream=codec_type,codec_name:stream_tags=language -of default=noprint_wrappers=1 "$LAST"
+    fi
+else
+    HDR "[4/5] Skipping real download (pass --download to do it)"
+    HDR "[5/5] Skipping ffprobe (pass --download to do it)"
+fi
+
+HDR "Done"
+echo "  - If [2/5] shows lang=en/eng/en-US variants → those should win"
+echo "  - If [3/5] step 1 picks one of them → helper config is correct"
+echo "  - If [3/5] step 1 picks lang=None or non-English → tell me which step picked what"
+echo "  - If the video has NO English-tagged audio → it's literally not available"
