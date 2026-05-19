@@ -38,6 +38,7 @@ import signal
 import struct
 import subprocess
 import sys
+import threading
 import traceback
 import urllib.parse
 
@@ -804,14 +805,17 @@ def run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key):
         result = _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key)
 
         if result["ok"]:
-            # Success — emit the final done message and return.
-            existing = result.get("already_exists_path", "")
-            if existing:
+            # Success — emit the final done message using the canonical
+            # filepath that yt-dlp reported via --print after_move.
+            filepath = result.get("filepath", "")
+            filename = result.get("filename", "")
+            if result.get("already_exists"):
                 send_message({
                     "type": "done",
-                    "filename": os.path.basename(existing),
+                    "filename": filename,
+                    "filepath": filepath,
                     "message": (
-                        f"Already downloaded: {existing}. "
+                        f"Already downloaded: {filepath}. "
                         "Delete the existing file if you want to re-download "
                         "(e.g. with different quality settings)."
                     ),
@@ -819,11 +823,10 @@ def run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key):
             else:
                 send_message({
                     "type": "done",
-                    "filename": result["filename"] or "Complete",
-                    "message": (
-                        f"Saved to {download_path}/{result['filename']}"
-                        if result["filename"] else f"Download complete. Check {download_path}."
-                    ),
+                    "filename": filename,
+                    "filepath": filepath,
+                    "message": f"Saved to {filepath}" if filepath
+                               else f"Download complete. Check {download_path}.",
                 })
             return
 
@@ -876,85 +879,22 @@ def run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key):
     send_message({"type": "error", "error": error_msg})
 
 
-def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
-    """One yt-dlp run. Returns {ok, filename, error}."""
-    global _active_proc
-    filename = ""
-    audio_only = format_key in AUDIO_ONLY_FORMATS
+# Marker used to tag the structured filepath line in yt-dlp's stdout. yt-dlp
+# emits this line via `--print after_move:PCFILE=%(filepath)s` AFTER the file
+# has been moved to its final post-merge location, so the path it reports is
+# the actual on-disk path — not a guessed name from log parsing.
+FILEPATH_MARKER = "PCFILE="
 
-    # --- yt-dlp invocation ---
-    #
-    # Cookies: --cookies-from-browser chrome reads the user's default Chrome
-    # profile cookie database to extract YouTube auth (required for Premium
-    # quality streams and members-only videos). yt-dlp parses the on-disk
-    # cookie store but only sends youtube.com cookies in the actual HTTP
-    # requests by virtue of standard cookie scoping.
-    #
-    # Player clients: order matters — yt-dlp merges format lists from all
-    # listed clients, then the -f selector + -S sort pick the winner.
-    #
-    #   "tv"         — YouTube's TV interface. Critically, this client does
-    #                  NOT require a PO (Proof-of-Origin) token, so it
-    #                  exposes the full quality ladder including 4K / 8K.
-    #                  Without `tv`, the `web` client alone caps you at 720p
-    #                  on most videos in 2025+ because YouTube hides higher
-    #                  formats from web clients without a PO token.
-    #   "web"        — carries cookies (for Premium tier streams + members-
-    #                  only content). Not enough on its own for 4K anymore.
-    #   "web_safari" — exposes the Premium enhanced-bitrate 1080p stream.
-    #   "mweb"       — surfaces additional AV1 variants on some videos.
-    #
-    # --no-playlist guards against the user pasting a /watch?...&list=...
-    # URL and accidentally queueing 100 downloads.
-    #
-    # -S (sort) makes sure the highest-bitrate stream wins among the ones
-    # that match -f — without it yt-dlp can pick a low-bitrate AV1 over a
-    # higher-bitrate VP9 at the same resolution.
-    # Auto-detect which Chrome profile has cookies that actually authenticate
-    # for this URL. The user may have 10+ profiles; only one (or two) hold
-    # the channel-membership cookies. Without this, we'd default to
-    # "Default" profile and YouTube returns "Join this channel" even when
-    # the user IS a paying member through a different profile.
-    chrome_profile = detect_chrome_profile(ytdlp, url)
-    cookies_arg = f"chrome:{chrome_profile}"
+# Hard cap on how long a single yt-dlp invocation may run. Beyond this the
+# helper terminates the process and returns a structured timeout error
+# rather than letting it run forever (and pinning the popup's port open).
+DOWNLOAD_TIMEOUT_SECONDS = 30 * 60  # 30 minutes
 
-    cmd = [
-        ytdlp,
-        "--cookies-from-browser", cookies_arg,
-        # `lang=en` makes the YouTube extractor request English metadata
-        # (title, description) and prefer English-tagged audio tracks. Many
-        # large channels now upload dubbed audio tracks in 5–10 languages;
-        # without this hint yt-dlp picks whatever YouTube returns first,
-        # which is often Spanish/Hindi/Portuguese instead of English.
-        "--extractor-args", "youtube:player_client=tv,web,web_safari,mweb;lang=en",
-        "--no-playlist",
-        "-f", fmt,
-        "-S", sort_order,
-        "--newline",
-        "--progress",
-        "--progress-template",
-        f"{PROGRESS_PREFIX}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s",
-        # Log selected format AFTER download completes (after_video event
-        # doesn't trigger --simulate, unlike the default pre_process event).
-        # Lets us debug "wrong language/quality" complaints from the log
-        # without affecting the download itself.
-        "--print", "after_video:[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s lang=%(language)s",
-        "-o", os.path.join(download_path, "%(title)s.%(ext)s"),
-    ]
 
-    if not audio_only:
-        # Prefer mp4 for compatibility, fall back to mkv when streams (4K VP9,
-        # AV1, Opus, etc.) aren't mp4-compatible. Without the mkv fallback,
-        # 4K downloads silently fail to merge.
-        cmd += ["--merge-output-format", "mp4/mkv"]
-
-    cmd.append(url)
-
-    log(f"running: {cmd}")
-
+def _runner_env():
+    """Subprocess environment with PixelCatch's install dirs on PATH so
+    yt-dlp's spawned ffmpeg/ffprobe children find the bundled binaries."""
     env = os.environ.copy()
-    # Front-load OS-appropriate locations where the bundled or system yt-dlp
-    # might live, so shutil.which / yt-dlp's own subprocess shells find it.
     if IS_WINDOWS:
         extra_path = os.pathsep.join([
             os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "PixelCatch"),
@@ -970,73 +910,269 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
             "/bin",
         ])
     env["PATH"] = extra_path + os.pathsep + env.get("PATH", "")
+    return env
 
+
+def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
+    """
+    Run yt-dlp once for `url`. Returns a structured dict:
+        {ok: bool, filepath: str, filename: str, error: str, already_exists: bool}
+
+    Design principles (vs. the old log-scraping approach):
+
+    * The canonical filepath comes from yt-dlp's `--print after_move:` event,
+      tagged with our `FILEPATH_MARKER` so we can extract it from mixed
+      stdout without regex-matching "[download] Destination:" lines or other
+      human-readable log noise.
+    * stdout and stderr are read on dedicated threads so neither can block
+      the other (yt-dlp writes a lot to both, especially during merge).
+    * Subprocess has a hard timeout via Popen.wait(timeout=...). On timeout
+      we send SIGTERM, then SIGKILL if it doesn't exit, then surface the
+      situation as a clean error to the caller — no zombie processes.
+    * Audio is force-tagged `language=eng` via ffmpeg metadata so the merged
+      mp4 reports `TAG:language=eng` to ffprobe / players, instead of `und`
+      which has been confusing users for weeks.
+    * Output container is `mp4` only (not `mp4/mkv`) — the brief calls for
+      mp4. yt-dlp will pick mp4-compatible streams when possible; if the
+      selected formats genuinely can't fit mp4 (e.g. VP9 4K + Opus), yt-dlp
+      emits a clear error that the retry chain in run_download() handles.
+    """
+    global _active_proc
+    audio_only = format_key in AUDIO_ONLY_FORMATS
+
+    # Auto-detect Chrome profile (multi-profile users — see detect_chrome_profile).
+    chrome_profile = detect_chrome_profile(ytdlp, url)
+
+    # Build the yt-dlp argv. Comments inline reference the engineering brief's
+    # required flags so anyone editing this can trace back to "why".
+    cmd = [
+        ytdlp,
+        # --- Auth / extractor knobs ---
+        "--cookies-from-browser", f"chrome:{chrome_profile}",
+        "--extractor-args", "youtube:player_client=tv,web,web_safari,mweb;lang=en",
+        "--no-playlist",
+
+        # --- Format selection ---
+        "-f", fmt,
+        "-S", sort_order,
+
+        # --- Progress output for the popup (machine-readable, line-prefixed) ---
+        "--newline",
+        "--progress",
+        "--progress-template",
+        f"{PROGRESS_PREFIX}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s",
+
+        # --- THE structured filepath line. `after_move` fires only once the
+        #     file is at its final post-process+move location, so the path is
+        #     authoritative. The PCFILE= marker lets our parser pick it out
+        #     unambiguously from mixed stdout. ---
+        "--print", f"after_move:{FILEPATH_MARKER}%(filepath)s",
+
+        # --- Output template ---
+        "-o", os.path.join(download_path, "%(title)s.%(ext)s"),
+    ]
+
+    if not audio_only:
+        cmd += [
+            # mp4 only per brief. If selected streams can't fit (rare —
+            # VP9/AV1 4K with Opus), yt-dlp errors out, the chain in
+            # run_download() falls through to a more permissive selector.
+            "--merge-output-format", "mp4",
+            # Force the audio stream's language metadata tag to `eng` so the
+            # final mp4 reports `TAG:language=eng` instead of `und`. The
+            # `ffmpeg:` prefix scopes the args to the ffmpeg merge step.
+            "--postprocessor-args", "ffmpeg:-metadata:s:a:0 language=eng",
+        ]
+    else:
+        # Audio-only: tag the language too so the resulting m4a is labelled.
+        cmd += [
+            "--postprocessor-args", "ffmpeg:-metadata:s:a:0 language=eng",
+        ]
+
+    cmd.append(url)
+    log(f"running: {cmd}")
+
+    # Subprocess: stdout and stderr on separate pipes (no `stderr=STDOUT`
+    # merging). yt-dlp writes a lot during merge; we don't want one stream
+    # to back up and block the other.
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,        # line-buffered so progress streams in real time
-        env=env,
+        bufsize=1,
+        env=_runner_env(),
     )
     _active_proc = proc
 
-    last_error = ""
-    already_exists_path = ""  # set if yt-dlp reports "file already downloaded"
+    # Shared state populated by the stream-reader threads.
+    state = {
+        "filepath": "",            # set when PCFILE=... line arrives
+        "already_exists_path": "",  # set on "[download] X has already been downloaded"
+        "last_error": "",
+        "current_filename": "",    # for progress messages while download is running
+    }
+    state_lock = threading.Lock()
 
-    for line in proc.stdout:
-        line = line.rstrip()
-        log(f"yt-dlp: {line}")
+    def _read_stdout():
+        for raw in proc.stdout:
+            line = raw.rstrip()
+            log(f"yt-dlp[out]: {line}")
 
-        if line.startswith("ERROR:"):
-            last_error = line.replace("ERROR:", "").strip()
+            # 1. Structured filepath marker (canonical — overrides everything).
+            if line.startswith(FILEPATH_MARKER):
+                with state_lock:
+                    state["filepath"] = line[len(FILEPATH_MARKER):].strip()
+                continue
 
-        # yt-dlp's --no-overwrites default: when destination already exists,
-        # it logs a line like "[download] <path> has already been downloaded".
-        # Capture it so we can tell the user the file's already there.
-        if "has already been downloaded" in line:
-            m = re.search(r"\[download\]\s+(.+?)\s+has already been downloaded", line)
-            if m:
-                already_exists_path = m.group(1).strip()
-                filename = os.path.basename(already_exists_path)
+            # 2. Progress: PCPROGRESS|... → parse and forward.
+            if line.startswith(PROGRESS_PREFIX) or LEGACY_PROGRESS_RE.search(line):
+                with state_lock:
+                    cur_name = state["current_filename"]
+                evt = parse_progress_line(line, cur_name)
+                if evt:
+                    send_message(evt)
+                continue
 
-        dest_m = DEST_RE.search(line)
-        if dest_m:
-            filename = os.path.basename(dest_m.group(1))
+            # 3. Filename hints (NOT used as final truth — only to label
+            #    in-progress messages before the after_move event fires).
+            dest_m = DEST_RE.search(line)
+            if dest_m:
+                # Strip yt-dlp's intermediate `.fNNN.ext` suffix that
+                # appears on per-stream destinations during DASH merges.
+                raw_name = os.path.basename(dest_m.group(1))
+                cleaned = re.sub(r"\.f\d+(?=\.[^.]+$)", "", raw_name)
+                with state_lock:
+                    state["current_filename"] = cleaned
+                continue
+            merger_m = MERGER_RE.search(line)
+            if merger_m:
+                with state_lock:
+                    state["current_filename"] = os.path.basename(merger_m.group(1))
+                send_message({
+                    "type": "progress",
+                    "percent": 99,
+                    "filename": state["current_filename"],
+                    "speed": "",
+                    "eta": "",
+                    "status": "Merging formats…",
+                })
+                continue
 
-        merger_m = MERGER_RE.search(line)
-        if merger_m:
-            filename = os.path.basename(merger_m.group(1))
-            send_message({
-                "type": "progress",
-                "percent": 99,
-                "filename": filename,
-                "speed": "",
-                "eta": "",
-                "status": "Merging formats…",
-            })
-            continue
+            # 4. Already-exists no-op detection (yt-dlp's --no-overwrites default).
+            if "has already been downloaded" in line:
+                m = re.search(r"\[download\]\s+(.+?)\s+has already been downloaded", line)
+                if m:
+                    with state_lock:
+                        state["already_exists_path"] = m.group(1).strip()
+                continue
 
-        progress_event = parse_progress_line(line, filename)
-        if progress_event:
-            send_message(progress_event)
+            # 5. ERROR lines (yt-dlp prints these to stdout sometimes too).
+            if line.startswith("ERROR:"):
+                with state_lock:
+                    state["last_error"] = line.replace("ERROR:", "").strip()
+                continue
 
-    proc.wait()
+            # Anything else: just log, ignore for parsing purposes.
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+
+    def _read_stderr():
+        for raw in proc.stderr:
+            line = raw.rstrip()
+            log(f"yt-dlp[err]: {line}")
+            if line.startswith("ERROR:"):
+                with state_lock:
+                    state["last_error"] = line.replace("ERROR:", "").strip()
+        try:
+            proc.stderr.close()
+        except Exception:
+            pass
+
+    t_out = threading.Thread(target=_read_stdout, daemon=True)
+    t_err = threading.Thread(target=_read_stderr, daemon=True)
+    t_out.start()
+    t_err.start()
+
+    # Bounded wait. On timeout, kill the process and surface a clean error.
+    try:
+        rc = proc.wait(timeout=DOWNLOAD_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        log(f"yt-dlp timed out after {DOWNLOAD_TIMEOUT_SECONDS}s — terminating")
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        except Exception:
+            pass
+        t_out.join(timeout=2)
+        t_err.join(timeout=2)
+        _active_proc = None
+        return {
+            "ok": False,
+            "filepath": "",
+            "filename": "",
+            "error": (
+                f"Download exceeded the {DOWNLOAD_TIMEOUT_SECONDS // 60}-minute"
+                " timeout and was terminated. Slow connection, or YouTube"
+                " is throttling — try again or pick a lower quality."
+            ),
+            "already_exists": False,
+        }
+
+    t_out.join(timeout=5)
+    t_err.join(timeout=5)
     _active_proc = None
 
-    if proc.returncode == 0:
-        result = {"ok": True, "filename": filename, "error": ""}
-        # Pass the "already exists" path through so run_download can build
-        # a clearer "this video was already in your Downloads folder" message
-        # for the user (instead of the misleading "Complete" they'd otherwise
-        # see when yt-dlp silently skips an existing file).
+    # Snapshot state under lock (threads have exited at this point but be safe).
+    with state_lock:
+        filepath = state["filepath"]
+        already_exists_path = state["already_exists_path"]
+        last_error = state["last_error"]
+
+    # === Success paths ===
+    if rc == 0:
+        if filepath:
+            return {
+                "ok": True,
+                "filepath": filepath,
+                "filename": os.path.basename(filepath),
+                "error": "",
+                "already_exists": False,
+            }
         if already_exists_path:
-            result["already_exists_path"] = already_exists_path
-        return result
+            return {
+                "ok": True,
+                "filepath": already_exists_path,
+                "filename": os.path.basename(already_exists_path),
+                "error": "",
+                "already_exists": True,
+            }
+        # Exit 0 but no structured filepath — defensive. Shouldn't happen
+        # with --print after_move, but if it does, we don't fabricate a name.
+        return {
+            "ok": False,
+            "filepath": "",
+            "filename": "",
+            "error": (
+                "yt-dlp exited successfully but didn't report a final filepath. "
+                "Check ~/Library/Logs/com.pixelcatch.downloader.log for details."
+            ),
+            "already_exists": False,
+        }
+
+    # === Failure paths ===
     return {
         "ok": False,
-        "filename": filename,
-        "error": last_error or f"yt-dlp exited with code {proc.returncode}.",
+        "filepath": "",
+        "filename": "",
+        "error": last_error or f"yt-dlp exited with code {rc}.",
+        "already_exists": False,
     }
 
 

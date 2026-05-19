@@ -170,7 +170,10 @@ function onJobMessage(jobId, msg) {
     job.state = "done";
     job.percent = 100;
     if (msg.filename) job.filename = msg.filename;
-    job.savedPath = extractSavedPath(msg.message) || "";
+    // Prefer the structured `filepath` field (helper now emits it directly
+    // from yt-dlp's `--print after_move:` event). Fall back to scraping the
+    // message text only if the helper is an older build that doesn't send it.
+    job.savedPath = msg.filepath || extractSavedPath(msg.message) || "";
     job.finishedAt = Date.now();
     job.error = "";
     showSuccessNotification(job);
