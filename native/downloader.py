@@ -799,14 +799,26 @@ def run_download(url, download_path, ytdlp, fmt_chain, sort_order, format_key):
 
         if result["ok"]:
             # Success — emit the final done message and return.
-            send_message({
-                "type": "done",
-                "filename": result["filename"] or "Complete",
-                "message": (
-                    f"Saved to {download_path}/{result['filename']}"
-                    if result["filename"] else f"Download complete. Check {download_path}."
-                ),
-            })
+            existing = result.get("already_exists_path", "")
+            if existing:
+                send_message({
+                    "type": "done",
+                    "filename": os.path.basename(existing),
+                    "message": (
+                        f"Already downloaded: {existing}. "
+                        "Delete the existing file if you want to re-download "
+                        "(e.g. with different quality settings)."
+                    ),
+                })
+            else:
+                send_message({
+                    "type": "done",
+                    "filename": result["filename"] or "Complete",
+                    "message": (
+                        f"Saved to {download_path}/{result['filename']}"
+                        if result["filename"] else f"Download complete. Check {download_path}."
+                    ),
+                })
             return
 
         last_error = result["error"]
@@ -903,12 +915,6 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
     cmd = [
         ytdlp,
         "--cookies-from-browser", cookies_arg,
-        # CRITICAL: --print (used below for [selected] logging) IMPLIES
-        # --quiet AND --simulate by default. Without --no-simulate, yt-dlp
-        # would resolve metadata, exit 0, and download nothing — making
-        # every "successful" run a phantom that wrote no file. This bug
-        # silently no-op'd downloads for weeks.
-        "--no-simulate",
         # `lang=en` makes the YouTube extractor request English metadata
         # (title, description) and prefer English-tagged audio tracks. Many
         # large channels now upload dubbed audio tracks in 5–10 languages;
@@ -922,11 +928,12 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
         "--progress",
         "--progress-template",
         f"{PROGRESS_PREFIX}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s",
-        # Echo the actual format that won so a future "low quality" complaint
-        # is debuggable from the log without re-running. Use the default
-        # "video" event (fires once per video before download); `before_dl`
-        # is NOT a valid --print event prefix and gets silently dropped.
-        "--print", "[selected] %(format_id)s %(width)sx%(height)s @ %(tbr)skbps %(vcodec)s+%(acodec)s",
+        # Removed the --print "[selected] ..." debug line. It implied --quiet
+        # AND --simulate, which silently broke downloads (no file written) and
+        # suppressed the "[download] file has already been downloaded" message
+        # we need to detect already-downloaded videos. yt-dlp's default
+        # output (which includes [download] Destination: lines) gives us
+        # everything we need.
         "-o", os.path.join(download_path, "%(title)s.%(ext)s"),
     ]
 
@@ -970,6 +977,7 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
     _active_proc = proc
 
     last_error = ""
+    already_exists_path = ""  # set if yt-dlp reports "file already downloaded"
 
     for line in proc.stdout:
         line = line.rstrip()
@@ -977,6 +985,15 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
 
         if line.startswith("ERROR:"):
             last_error = line.replace("ERROR:", "").strip()
+
+        # yt-dlp's --no-overwrites default: when destination already exists,
+        # it logs a line like "[download] <path> has already been downloaded".
+        # Capture it so we can tell the user the file's already there.
+        if "has already been downloaded" in line:
+            m = re.search(r"\[download\]\s+(.+?)\s+has already been downloaded", line)
+            if m:
+                already_exists_path = m.group(1).strip()
+                filename = os.path.basename(already_exists_path)
 
         dest_m = DEST_RE.search(line)
         if dest_m:
@@ -1003,7 +1020,14 @@ def _attempt_download(url, download_path, ytdlp, fmt, sort_order, format_key):
     _active_proc = None
 
     if proc.returncode == 0:
-        return {"ok": True, "filename": filename, "error": ""}
+        result = {"ok": True, "filename": filename, "error": ""}
+        # Pass the "already exists" path through so run_download can build
+        # a clearer "this video was already in your Downloads folder" message
+        # for the user (instead of the misleading "Complete" they'd otherwise
+        # see when yt-dlp silently skips an existing file).
+        if already_exists_path:
+            result["already_exists_path"] = already_exists_path
+        return result
     return {
         "ok": False,
         "filename": filename,
