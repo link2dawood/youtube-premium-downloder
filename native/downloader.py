@@ -194,89 +194,95 @@ YOUTUBE_HOSTS = {
 # videos the English audio is gated to channel members but lower-quality
 # English (or English at lower resolution) is public — we want that over
 # a Spanish/Hindi/Ukrainian dub at the user's preferred resolution.
-# Format chain strategy:
-#   1. Tier 1 — preferred quality + English-tagged audio (multi-lang videos)
-#   2. Tier 2 — preferred quality + any audio (single-lang videos, no lang tag)
-#   3. Tier 3 — any lower quality + any audio (last resort)
+# EN-US STRICT — every chain step requires English-tagged audio (en, en-US,
+# en-GB, eng) OR explicitly-undefined audio (und = no language tag set, which
+# is what YouTube uses for the original audio on single-language English
+# videos like Big Buck Bunny). NO fallback to "any audio" — if no English-
+# tagged or untagged audio exists, the download fails with a clear error
+# rather than silently delivering Spanish/Hindi/etc.
 #
-# Removed the format_id^[0-9]+$ "original audio" filter because it broke HLS
-# videos where ALL audio formats have -N suffix (no plain "140" exists, only
-# "140-N" variants). For DASH videos yt-dlp's natural sort still picks 140 as
-# original when our sort has acodec:m4a as a preference key.
+# Sort: `lang` FIRST so even when the no-filter fallback runs, yt-dlp
+# prefers English-preferred-language formats over non-English by sort.
+# `language_preference` is set high (10) by the YouTube extractor for
+# formats matching the extractor's `lang=en` arg, default for others.
 FORMAT_PRESETS = {
     "best": (
         [
-            "bv*+ba[language~='^(en|eng|und)']",  # English-tagged
-            "bv*+ba",                          # any audio
-            "best",
+            "bv*+ba[language~='^(en|eng)']",   # English-tagged
+            "bv*+ba[language=und]",             # explicitly undefined
+            "bv*+ba",                           # any (sort picks en-pref)
         ],
-        "res,tbr,fps,vcodec:av01,acodec:opus,lang,channels",
+        "lang,res,tbr,fps,vcodec:av01,acodec:opus,channels",
     ),
     "4k": (
         [
-            "bv*[height<=2160]+ba[language~='^(en|eng|und)']",
-            "bv*[height<=2160]+ba",
-            "bv*+ba[language~='^(en|eng|und)']",
+            "bv*[height<=2160]+ba[language~='^(en|eng)']",
+            "bv*[height<=2160]+ba[language=und]",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba[language=und]",
             "bv*+ba",
-            "best",
         ],
-        "res:2160,tbr,fps,vcodec:av01,acodec:opus,lang",
+        "lang,res:2160,tbr,fps,vcodec:av01,acodec:opus",
     ),
     "2k": (
         [
-            "bv*[height<=1440]+ba[language~='^(en|eng|und)']",
-            "bv*[height<=1440]+ba",
-            "bv*+ba[language~='^(en|eng|und)']",
+            "bv*[height<=1440]+ba[language~='^(en|eng)']",
+            "bv*[height<=1440]+ba[language=und]",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba[language=und]",
             "bv*+ba",
-            "best",
         ],
-        "res:1440,tbr,fps,vcodec:av01,acodec:opus,lang",
+        "lang,res:1440,tbr,fps,vcodec:av01,acodec:opus",
     ),
     "1080p": (
         [
-            "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng|und)']",
-            "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a]",
-            "bv*[height<=1080]+ba[language~='^(en|eng|und)']",
-            "bv*[height<=1080]+ba",
-            "best[height<=1080]",
-            "bv*+ba[language~='^(en|eng|und)']",
+            # Preferred: 1080p AVC mp4 + English-tagged audio (clean en-US .mp4)
+            "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=1080][vcodec~='^(avc|h264)']+ba[ext=m4a][language=und]",
+            # Drop AVC constraint, keep English
+            "bv*[height<=1080]+ba[language~='^(en|eng)']",
+            "bv*[height<=1080]+ba[language=und]",
+            # Drop resolution, keep English
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba[language=und]",
+            # Last resort — no filter but sort puts English first
             "bv*+ba",
-            "best",
         ],
-        "res:1080,tbr,fps,vcodec:avc1,acodec:m4a,lang",
+        "lang,res:1080,tbr,fps,vcodec:avc1,acodec:m4a",
     ),
     "720p": (
         [
-            "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng|und)']",
-            "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a]",
-            "bv*[height<=720]+ba[language~='^(en|eng|und)']",
-            "bv*[height<=720]+ba",
-            "best[height<=720]",
+            "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=720][vcodec~='^(avc|h264)']+ba[ext=m4a][language=und]",
+            "bv*[height<=720]+ba[language~='^(en|eng)']",
+            "bv*[height<=720]+ba[language=und]",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba[language=und]",
             "bv*+ba",
-            "best",
         ],
-        "res:720,tbr,fps,vcodec:avc1,acodec:m4a,lang",
+        "lang,res:720,tbr,fps,vcodec:avc1,acodec:m4a",
     ),
     "480p": (
         [
-            "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng|und)']",
-            "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a]",
-            "bv*[height<=480]+ba",
-            "best[height<=480]",
+            "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language~='^(en|eng)']",
+            "bv*[height<=480][vcodec~='^(avc|h264)']+ba[ext=m4a][language=und]",
+            "bv*[height<=480]+ba[language~='^(en|eng)']",
+            "bv*[height<=480]+ba[language=und]",
+            "bv*+ba[language~='^(en|eng)']",
+            "bv*+ba[language=und]",
             "bv*+ba",
-            "best",
         ],
-        "res:480,tbr,fps,vcodec:avc1,acodec:m4a,lang",
+        "lang,res:480,tbr,fps,vcodec:avc1,acodec:m4a",
     ),
     "audio": (
         [
-            "ba[ext=m4a][language~='^(en|eng|und)']",
-            "ba[language~='^(en|eng|und)']",
-            "ba[ext=m4a]",
+            "ba[ext=m4a][language~='^(en|eng)']",
+            "ba[language~='^(en|eng)']",
+            "ba[ext=m4a][language=und]",
+            "ba[language=und]",
             "ba",
-            "best",
         ],
-        "abr,acodec:m4a:opus,lang",
+        "lang,abr,acodec:m4a:opus",
     ),
 }
 
